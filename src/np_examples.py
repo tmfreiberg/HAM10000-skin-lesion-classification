@@ -1,4 +1,5 @@
 import numpy as np
+from graph_utils.math import nmb_images
 
 
 if __name__ == '__main__':
@@ -9,3 +10,5 @@ if __name__ == '__main__':
     print(x[:, None]*y[None, :])
 
     assert np.all((x[:, None]*y[None,:]).shape == (3, 7))
+
+    print("I imported nmb_images from a sub-package. It equals = ", nmb_images)
