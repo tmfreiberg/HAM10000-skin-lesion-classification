@@ -1,0 +1,7 @@
+# Ignore image files (too many, too large)
+*.jpg
+
+# Don't ignore these (currently) empty directories
+expository/
+literature/
+presentation/
