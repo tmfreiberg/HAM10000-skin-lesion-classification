@@ -87,13 +87,15 @@ class path_setup:
     def subfolders(
         base_path: Path, base_name: str = "project", Print: bool = True
     ) -> dict:
-        folders = [base_name] + [
+        folders = [
             f
             for f in os.listdir(base_path)
             if f[0] != "." and os.path.isdir(base_path.joinpath(f))
         ]
         path = dict.fromkeys(folders)
         path[base_name] = base_path
+        if Print:
+            print(f"path['{base_name}'] : {path[base_name]}")
         for folder in folders:
             path[folder] = base_path.joinpath(folder)
             if Print:
