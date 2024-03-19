@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from typing import Union
 
+# SETTING PATHS IN A PLATFORM-INDEPENDENT WAY
 
 class path_setup:
     default_env_var = "SKIN_LESION_CLASSIFICATION"
@@ -99,6 +100,29 @@ class path_setup:
                 print(f"path['{folder}'] : {path[folder]}")
         return path
 
+# LOADING DATA
+
+def process_metadata_csv(csv_path: Union[Path, None] = None) -> pd.DataFrame:
+    """
+    Process metadata CSV file to add a column for the number of images per lesion.
+
+    Args:
+    csv_path (str or Path, optional): Path to the metadata CSV file.
+        Defaults to path["images"].
+
+    Returns:
+    pd.DataFrame: Processed metadata DataFrame.
+    """
+    if csv_path is None:
+        csv_path = Path(os.getenv("SKIN_LESION_CLASSIFICATION")).joinpath("images")
+#         csv_path = path["images"].joinpath("metadata.csv")
+
+    metadata = pd.read_csv(csv_path)
+    metadata_duplicates = metadata[metadata.duplicated(subset='lesion_id')].sort_values('lesion_id')
+    metadata.insert(1, 'no_of_images', metadata['lesion_id'].map(metadata['lesion_id'].value_counts()))
+    return metadata
+    
+# VIEWING IMAGES    
 
 class view_images:
     def __init__(self):
