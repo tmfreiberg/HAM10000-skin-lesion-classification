@@ -1,2 +1,3 @@
 # Ignore image files (too many, too large)
 *.jpg
+notebooks/.ipynb_checkpoints
