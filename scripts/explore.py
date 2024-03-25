@@ -8,25 +8,125 @@ from typing import Union
 
 # LOADING DATA
 
-def process_metadata_csv(csv_path: Union[Path, None], Print: bool = True, display_head: bool = True) -> pd.DataFrame:
-    """
-    Process metadata CSV file to add a column for the number of images per lesion.
+class data_handling:
+    @staticmethod
+    def process_metadata_csv(csv_path: Union[Path, None], Print: bool = True, display_head: bool = True) -> None:
+        """
+        Process metadata CSV file to add a column for the number of images per lesion.
 
-    Args:
-    csv_path (str or Path, optional): Path to the metadata CSV file.
-        Defaults to gbl_project_path.joinpath("images/metadata.csv").
+        Args:
+        csv_path (str or Path, optional): Path to the metadata CSV file.
+            Defaults to gbl_project_path.joinpath("images/metadata.csv").
 
-    Returns:
-    pd.DataFrame: Processed metadata DataFrame.
-    """
-    if Print:
-        print("Reading metadata.csv into dataframe and adding \'num_images\' column.")
-    metadata = pd.read_csv(csv_path)
-    metadata_duplicates = metadata[metadata.duplicated(subset='lesion_id')].sort_values('lesion_id')
-    metadata.insert(1, 'num_images', metadata['lesion_id'].map(metadata['lesion_id'].value_counts()))
-    if display_head:
-        display(metadata.head())
-    return metadata
+        Returns:
+        pd.DataFrame: Processed metadata DataFrame.
+        """
+        if Print:
+            print("Reading metadata.csv into dataframe and adding \'num_images\' column.")
+        metadata = pd.read_csv(csv_path)
+#         metadata_duplicates = metadata[metadata.duplicated(subset='lesion_id')].sort_values('lesion_id')
+        metadata.insert(1, 'num_images', metadata['lesion_id'].map(metadata['lesion_id'].value_counts()))
+        if display_head:
+            display(metadata.head())
+        return metadata
+
+    # CREATE TRAIN/VAL SPLIT
+
+    @staticmethod
+    def partition(df: pd.DataFrame, tvr: int = 3, seed: int = 0, keep_first: bool = False, display_head: bool = True) -> None:
+        # Make sure df is of the right form
+        assert all(col in df.columns for col in ["lesion_id", "image_id"]), "Dataframe should contain \'lesion_id\' and \'image_id\' columns at least."
+
+        # Collect distinct lesions
+        distinct_lesions = df['lesion_id'].unique()
+
+        # Determine the number of distinct lesions to be represented in the training set
+        if tvr == 0:
+            distinct_lesions_train_size
+        else:
+            distinct_lesions_train_size = int(distinct_lesions.shape[0]*(1/(1 + 1/tvr)))
+
+        # Randomly select that many distinct lesions to be represented in our training set, with the rest to be represented in our validation set.
+        np.random.seed(seed)
+        t = np.random.choice(distinct_lesions, distinct_lesions_train_size, replace = False)
+        v = distinct_lesions[~np.isin(distinct_lesions, t)]        
+
+        # For the one-image-per-lesion scenarios
+        if keep_first: # Keep first image of each lesion
+            t1 = df[df['lesion_id'].isin(t)].drop_duplicates(subset=['lesion_id'], keep='first')['image_id']   
+            v1 = df[df['lesion_id'].isin(v)].drop_duplicates(subset=['lesion_id'], keep='first')['image_id']   
+        else: # Keep a random image of each lesion
+            t1 = df[df['lesion_id'].isin(t)].sample(frac=1, random_state=seed).drop_duplicates(subset=['lesion_id'], keep='first')['image_id']         
+            v1 = df[df['lesion_id'].isin(v)].sample(frac=1, random_state=seed).drop_duplicates(subset=['lesion_id'], keep='first')['image_id']         
+            
+        # For the all-images scenarios    
+        ta = df[(df['lesion_id'].isin(t)) & ~(df['image_id'].isin(t1))]['image_id']
+        va = df[(df['lesion_id'].isin(v)) & ~(df['image_id'].isin(v1))]['image_id']
+
+        # Add labels to our dataframe, in a new column called 'set'
+        df.loc[df['image_id'].isin(t1),'set'] = 't1'
+        df.loc[df['image_id'].isin(v1),'set'] = 'v1'
+        df.loc[df['image_id'].isin(ta),'set'] = 'ta'
+        df.loc[df['image_id'].isin(va),'set'] = 'va'
+
+        if display_head:
+            print("Displaying first five rows of updated dataframe.")
+            display(df.head())
+
+        
+# ANALYZE DATA
+
+class data_analysis:
+    @staticmethod
+    def frequencies(df: pd.DataFrame, *args: Union[str, int]) -> pd.DataFrame:
+        """
+        Either args = (col1) or args = (col1, value, col2), where col1
+        is a column name ('dx', 'dx_type', etc.), value is a possible
+        value within the corresponding column (e.g. 'mel', 'histo',
+        etc.), and col2 is another column name (e.g. 'age', 'sex',
+        'localization').
+
+        Output:
+            In case args = (col1), output gives the frequencies (absolute
+            and relative) for all of the different values found in the
+            relevant dataframe under column col1. In case args = (col1,
+            value, col2), we restrict the relevant dataframe to rows where
+            only value appears under column col1, and in _that_ restricted
+            dataframe, output gives the frequencies (absolute and relative)
+            of all of the different values under col2.
+        """
+        if len(args) == 1:
+            col = df[args[0]]
+            output = pd.concat(
+                [
+                    col.value_counts(dropna=False),
+                    col.value_counts(normalize=True, dropna=False).mul(100).round(2),
+                ],
+                axis=1,
+                keys=["freq", "%"],
+            )
+            output.index.names = [args[0]]
+            return output.T
+        elif len(args) == 3:
+            col1, value, col2 = args
+            col = df[df[col1] == value][col2]
+            output = pd.concat(
+                [
+                    col.value_counts(dropna=False),
+                    col.value_counts(normalize=True, dropna=False).mul(100).round(2),
+                ],
+                axis=1,
+                keys=["freq", "%"],
+            )
+            output.index.names = [col2]
+            return output.T
+        else:
+            raise ValueError(
+                "Invalid number of arguments. Expected 1 (col1) or 3 (col1, value, col2) arguments."
+            )
+                
+
+
     
 # VIEWING IMAGES    
 
@@ -268,54 +368,6 @@ class view_images:
                     ax = plt.subplot(nrows, ncols, i * ncols + j + 1)
                     plt.axis("off")
         plt.show()
-
-# ANALYSING DATA
-
-class analyse_metadata:
-    @staticmethod
-    def frequencies(df: pd.DataFrame, *args: Union[str, int]) -> pd.DataFrame:
-        """
-        Either args = (col1) or args = (col1, value, col2), where col1
-        is a column name ('dx', 'dx_type', etc.), value is a possible
-        value within the corresponding column (e.g. 'mel', 'histo',
-        etc.), and col2 is another column name (e.g. 'age', 'sex',
-        'localization').
-
-        Output:
-            In case args = (col1), output gives the frequencies (absolute
-            and relative) for all of the different values found in the
-            relevant dataframe under column col1. In case args = (col1,
-            value, col2), we restrict the relevant dataframe to rows where
-            only value appears under column col1, and in _that_ restricted
-            dataframe, output gives the frequencies (absolute and relative)
-            of all of the different values under col2.
-        """
-        if len(args) == 1:
-            col = df[args[0]]
-            output = pd.concat(
-                [
-                    col.value_counts(dropna=False),
-                    col.value_counts(normalize=True, dropna=False).mul(100).round(2),
-                ],
-                axis=1,
-                keys=["freq", "%"],
-            )
-            output.index.names = [args[0]]
-            return output.T
-        elif len(args) == 3:
-            col1, value, col2 = args
-            col = df[df[col1] == value][col2]
-            output = pd.concat(
-                [
-                    col.value_counts(dropna=False),
-                    col.value_counts(normalize=True, dropna=False).mul(100).round(2),
-                ],
-                axis=1,
-                keys=["freq", "%"],
-            )
-            output.index.names = [col2]
-            return output.T
-        else:
-            raise ValueError(
-                "Invalid number of arguments. Expected 1 (col1) or 3 (col1, value, col2) arguments."
-            )
+        
+        
+        
