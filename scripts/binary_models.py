@@ -14,9 +14,7 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-# import matplotlib.pyplot as plt
-# from typing import Union
-  
+# import matplotlib.pyplot as plt  
     
 class process:
     def __init__(self, 
@@ -458,7 +456,7 @@ class evaluation:
 # FOR THE NEURAL NETWORK
 
 class image_n_label:
-    def __init__(self, df: pd.DataFrame, subset: list, dx: str, data_dir: Path, transform=None) -> (Image, str):
+    def __init__(self, df: pd.DataFrame, subset: list, dx: str, data_dir: Path, transform=None) -> (Image, str, str):
         self.df = df
         self.subset = subset
         self.dx = dx
@@ -636,8 +634,9 @@ class resnet18:
             model = nn.DataParallel(model)
 
         # Dataframe to store image_id and prediction
-        image_id_prob = pd.DataFrame(columns = ["image_id", "prob"])
-
+#         image_id_prob = pd.DataFrame(columns = ["image_id", "prob"])
+        image_id_prob = pd.DataFrame({"image_id": ["x"], "prob": [-1]})
+        
         # Iterate through the DataLoader and make predictions
         with torch.no_grad():
             for images, targets, image_ids in dataloader:
