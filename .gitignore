@@ -1,6 +1,9 @@
 # Ignore image files (too many, too large)
 *.jpg
 
+# Ignore .pth files (too large)
+*.pth
+
 # Ignore these folders:
 notebooks/.ipynb_checkpoints
 scripts/__pycache__/
