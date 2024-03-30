@@ -3,13 +3,14 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from IPython.display import display
+from typing import Dict, Union
 
 
 class process:
     def __init__(
         self,
         data_dir: Path,
-        filename: str = "metadata.csv",
+        csv_filename: str = "metadata.csv",
         tvr: int = 3,
         seed: int = 0,
         keep_first: bool = False,
@@ -18,9 +19,9 @@ class process:
     ) -> None:
 
         self.data_dir = data_dir
-        self.filename = filename
-        # New attribute: file_path
-        self.file_path: Path = self.data_dir.joinpath(self.filename)
+        self.csv_filename = csv_filename
+        # New attribute: self._csv_file_path
+        self._csv_file_path: Path = self.data_dir.joinpath(self.csv_filename)
         # Continuing...
         self.tvr = tvr
         self.seed = seed
@@ -37,14 +38,14 @@ class process:
         self.insert_label_column()
         # Insert 'set' column indicating train/val assignment
         self.train_val_split()
-
+    
     def load(self):
         # Load metadata.csv into a dataframe.
         try:
-            self.df = pd.read_csv(self.file_path)
-            print(f"Successfully loaded file '{self.file_path}'.")
+            self.df = pd.read_csv(self._csv_file_path)
+            print(f"Successfully loaded file '{self._csv_file_path}'.")
         except Exception as e:
-            print(f"Error loading file '{self.file_path}': {e}")
+            print(f"Error loading file '{self._csv_file_path}': {e}")
 
     def insert_num_images(self) -> None:
         # Insert 'num_images' column to the right of 'lesion_id' column.
@@ -71,10 +72,18 @@ class process:
             self.to_classify = list(care_about)
             others = all_dxs - care_about
             if others == {}:
-                self.label_dict = {dx: i for i, dx in enumerate(care_about)}
+                # New attribute
+                self._label_dict = {dx: i for i, dx in enumerate(care_about)}
+                # New attribute 
+                self._label_codes = {i: dx for i, dx in enumerate(care_about)}
             else:
-                self.label_dict = {dx: 0 for dx in others}
-                self.label_dict.update({dx: i + 1 for i, dx in enumerate(care_about)})
+                self._label_dict = {dx : 0 for dx in others}
+                self._label_dict.update({dx: i + 1 for i, dx in enumerate(care_about)})
+                # New attribute
+                self._label_codes = {0 : 'other'}
+                self._label_codes.update({i + 1: dx for i, dx in enumerate(care_about)})              
+            # New attribute
+            self._num_labels = len(self._label_dict)                
             print("Created label_dict (maps labels to indices).")
         except Exception as e:
             print(f"Error creating label_dict: {e}")
@@ -82,7 +91,7 @@ class process:
     def insert_label_column(self) -> None:
         # Insert 'label' column to the right of 'dx' column.
         try:
-            self.df.insert(4, "label", self.df["dx"].map(self.label_dict))
+            self.df.insert(4, "label", self.df["dx"].map(self._label_dict))
             print(f"Inserted 'label' column in dataframe, to the right of 'dx' column.")
         except Exception as e:
             print(f"Error inserting 'label' column: {e}.")
@@ -213,6 +222,18 @@ class process:
             print(
                 f"Added 'set' column to dataframe, with values 't1', 'v1', 'ta', and 'va', to the right of 'localization' column."
             )
+            
+        # We create new attributes df_train1, df_train_a, df_val1, and df_val_a.
+        # They are references to df (all point to the same underlying dataframe object in memory).
+        # Any modifications made to self.df will also affect self.df_trian1 etc., and vicer-versa.
+        self._df_train1 = self.df[self.df["set"] == "t1"]
+        self._df_train_a = self.df[(self.df["set"] == "t1") | (self.df["set"] == "ta")]
+        self._df_val1 = self.df[self.df["set"] == "v1"]
+        self._df_val_a = self.df[(self.df["set"] == "v1") | (self.df["set"] == "va")] 
+
+        # Finally, for convenience, we create a test dataframe (again a reference to self.df).
+        # By "test" we mean something to test our code, not a "test set" for our models.
+        self._df_sample_batch = self.df.sample(n=64, random_state=self.seed)
 
     # DIAGNOSIS DISTRIBUTION FOR LESIONS AND IMAGES, AFTER TRAIN/VAL SPLIT
 
@@ -267,11 +288,11 @@ class process:
         dx_breakdown_dist.index.names = ["dx"]
         
         try:
-            index_mapping = { value : key for key, value in self.label_dict.items() if value != 0 }
-            if len({ key : value for key, value in self.label_dict.items() if value == 0}) > 1:
+            index_mapping = { value : key for key, value in self._label_dict.items() if value != 0 }
+            if len({ key : value for key, value in self._label_dict.items() if value == 0}) > 1:
                 index_mapping.update({ 0 : 'other'})
             else:
-                index_mapping.update({ key : value for key, value in self.label_dict.items() if value == 0})
+                index_mapping.update({ key : value for key, value in self._label_dict.items() if value == 0})
             dx_breakdown_dist.index = dx_breakdown_dist.index.map(index_mapping)
         except:
             pass
@@ -293,3 +314,18 @@ class process:
                 print(
                     f"Total {across}: {col.shape[0]} ({100*col.shape[0]/tot_images:.2f}% of all {across}).\n"
                 )
+
+                
+    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, dict, int, pd.DataFrame]]:
+        return {
+            "_csv_file_path": self._csv_file_path,
+            "_label_dict": self._label_dict,
+            "_label_codes": self._label_codes,
+            "_num_labels": self._num_labels,
+            "_df_train1": self._df_train1,
+            "_df_train_a": self._df_train_a,
+            "_df_val1": self._df_val1,
+            "_df_val_a": self._df_val_a,
+            "_df_sample_batch": self._df_sample_batch
+        }
+    

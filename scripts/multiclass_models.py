@@ -15,166 +15,13 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-class process:
-    def __init__(self, 
-                 data_dir: Path, 
-                 filename: str, 
-                 tvr: int, 
-                 seed: int, 
-                 keep_first: bool,
-                 dxs: list,
-                 label_codes: dict = None,) -> None:
-
-        self.data_dir = data_dir
-        self.filename = filename
-        self.file_path = self.data_dir.joinpath(self.filename)
-        self.dxs = dxs
-        
-        # Load metadata.csv into a dataframe.
-        try:
-            self.df = pd.read_csv(self.file_path)
-            print(f"Successfully loaded file '{self.file_path}'.")
-        except Exception as e:
-            print(f"Error loading file '{self.file_path}': {e}")
-        
-        # Insert 'num_images' column to the right of 'lesion_id' column.
-        try:
-            self.df.insert(1, 'num_images', self.df['lesion_id'].map(self.df['lesion_id'].value_counts()))
-            print(f"Inserted \'num_images\' column.")
-        except Exception as e:
-            print(f"Error inserting \'num_images\' column: {e}")  
-        
-        # Insert 'class' column to the right of 'dx' column.
-        try:
-            all_dxs = {"nv", "bkl", "vasc", "df", "mel", "bcc", "akiec"}
-            not_dxs = all_dxs - set(self.dxs)
-            map_dict = {**{dx : dx for dx in self.dxs} , **{dx : "other" for dx in not_dxs}}
-            self.df.insert(4, 'label', self.df['dx'].map(map_dict))
-            self.dxs.append("other")
-            print(f"Inserted \'label\' column.")            
-        except Exception as e:
-            print(f"Error inserting \'label\' column: {e}.")
-        # Create label_codes dictionary for converting string labels to integers.
-        try:
-            labels = self.df["label"].unique()
-            self.label_codes = { label : index for index, label in enumerate(labels) }
-        except Exception as e:
-            print(f"Error creating label_codes diciontary: {e}.")
-        
-        # Add 'set' column indicating which set (train/val) each lesion (and its images) belongs to.
-        self.tvr = tvr
-        self.seed = seed
-        self.keep_first = keep_first
-        
-        # Collect distinct lesions
-        try:
-            distinct_lesions = self.df['lesion_id'].unique()
-        except Exception as e:
-            print(f"Error obtaining array of unique \'lesion_id\'s: {e}")
-        # Determine the number of distinct lesions to be represented in the training set
-        if self.tvr == 0:
-            distinct_lesions_train_size = 0
-        else:
-            distinct_lesions_train_size = int(distinct_lesions.shape[0]*(1/(1 + 1/self.tvr)))
-        
-        # Randomly select that many distinct lesions to be represented in our training set. 
-        np.random.seed(self.seed)
-        t = np.random.choice(distinct_lesions, distinct_lesions_train_size, replace = False)
-        # The distinct lesions not represented in our training set will be represented in our validation set.
-        v = distinct_lesions[~np.isin(distinct_lesions, t)]        
-        
-        # For the one-image-per-lesion scenarios
-        try:
-            if self.keep_first: # Keep first image of each lesion
-                t1 = self.df[self.df['lesion_id'].isin(t)].drop_duplicates(subset=['lesion_id'], keep='first')['image_id']   
-                v1 = self.df[self.df['lesion_id'].isin(v)].drop_duplicates(subset=['lesion_id'], keep='first')['image_id']   
-            else: # Keep a random image of each lesion
-                t1 = self.df[self.df['lesion_id'].isin(t)].sample(frac=1, random_state=self.seed).drop_duplicates(subset=['lesion_id'], keep='first')['image_id']         
-                v1 = self.df[self.df['lesion_id'].isin(v)].sample(frac=1, random_state=self.seed).drop_duplicates(subset=['lesion_id'], keep='first')['image_id']   
-        except Exception as e:
-            print(f"Error dropping duplicate \'lesion_id\'s and keeping one \'image_id\' per \'lesion_id\': {e}.")
-
-        # For the all-images scenarios    
-        ta = self.df[(self.df['lesion_id'].isin(t)) & ~(self.df['image_id'].isin(t1))]['image_id']
-        va = self.df[(self.df['lesion_id'].isin(v)) & ~(self.df['image_id'].isin(v1))]['image_id']
-
-        # Add labels to our dataframe, in a new column called 'set'
-        try:
-            self.df.loc[self.df['image_id'].isin(t1),'set'] = 't1'
-            self.df.loc[self.df['image_id'].isin(v1),'set'] = 'v1'
-            self.df.loc[self.df['image_id'].isin(ta),'set'] = 'ta'
-            self.df.loc[self.df['image_id'].isin(va),'set'] = 'va'
-            print("Added \'set\' column with tags \'t1\', \'v1\', \'ta\', and \'va\'.")
-        except Exception as e:
-            print(f"Error adding \'set\' column with tags indicating train/val assignment: {e}.")
-         
-    # DIAGNOSIS DISTRIBUTION FOR LESIONS AND IMAGES, AFTER TRAIN/VAL SPLIT
-
-    def dx_dist(self, subset: str = "all", across: str = "lesions") -> None:
-        df = self.df
-        # Shorthand for relevant conditions
-        T1 = df['set'] == "t1" # train on one image per lesion
-        V1 = df['set'] == "v1" # validate on one image per lesion
-        TA = T1 | (df['set'] == "ta") # train on all images (recall that this means t1 OR ta)
-        VA = V1 | (df['set'] == "va") # validate on all images (recall that this means v1 OR va)
-
-        tot_lesions = df[T1 | V1].shape[0]
-        tot_images = df[TA | VA].shape[0]
-
-        if subset == "all":
-            subset = "overall"
-            if across == "lesions":
-                col = df[T1 | V1]["label"]
-            else: 
-                across == "images"
-                col = df[TA | VA]["label"]
-        elif subset == "train":
-            if across == "lesions":
-                col = df[T1]["label"]
-            else: 
-                across == "images"
-                col = df[TA]["label"]
-        else:  
-            if across == "lesions":
-                col = df[V1]["label"]
-            else:  
-                across == "images"
-                col = df[VA]["label"]
-
-        # Print heading
-        print("="*45 + f"\nDistribution of {across} by diagnosis: {subset}\n".upper() + "="*45)
-        # Get the frequencies and place them in a dataframe
-        dx_breakdown_dist = pd.concat([col.value_counts(), col.value_counts(normalize=True).mul(100).round(2)],axis=1, keys=['freq', '%'])
-        dx_breakdown_dist.index.names = ['dx']
-        # Display the results
-        try:
-            display(dx_breakdown_dist.T)
-        except:
-            print(dx_breakdown_dist.T)
-        # Print relative sizes of train/val
-        if subset == "overall":
-            print(f"Total {across}: {col.shape[0]}.\n")
-        else:
-            if across == "lesions":
-                print(f"Total {across}: {col.shape[0]} ({100*col.shape[0]/tot_lesions:.2f}% of all {across}).\n")
-            elif across == "images":
-                print(f"Total {across}: {col.shape[0]} ({100*col.shape[0]/tot_images:.2f}% of all {across}).\n")
                 
-                
-# FOR THE NEURAL NETWORK
-
 class image_n_label:
-    def __init__(self, df: pd.DataFrame, label_codes: dict, subset: list, data_dir: Path, transform=None) -> (Image, str, str):
+    def __init__(self, df: pd.DataFrame, data_dir: Path, transform=None) -> (Image, str, str):
         self.df = df
-        self.label_codes = label_codes
-        self.subset = subset
         self.data_dir = data_dir
         self.transform = transform
-    
-        try:
-            self.df = self.df[self.df["set"].isin(subset)]
-        except Exception as e:
-            print(f"Encountered error while attempted to restrict dataframe to {train}: {e}.")
+        # We need to reset the index because...KeyError....        
         self.df.reset_index(inplace=True)
 
     def __len__(self):
@@ -183,20 +30,22 @@ class image_n_label:
     def __getitem__(self, idx):
         img_name = self.data_dir.joinpath(self.df.loc[idx, "image_id"] + ".jpg")  
         image = Image.open(img_name)
+#         dx = self.df.loc[idx, "dx"]
+#         label_code = self.label_dict[dx]
         label = self.df.loc[idx, "label"]
-        label_code = self.label_codes[label]
+#         label_word = self.label_codes[label]
         image_id = self.df.loc[idx, "image_id"]
             
         if self.transform:
             image = self.transform(image)
 
-        return image, label_code, image_id
+        return image, label, image_id
     
 class resnet18:
     def __init__(self, 
                  df: pd.DataFrame, 
-                 train_set: list,
-                 dxs: list, 
+                 train_set: Union[pd.DataFrame, list, str],
+                 val_set: Union[pd.DataFrame, list, str],
                  label_codes: dict,
                  data_dir: Path, 
                  model_dir: Path, 
@@ -207,13 +56,35 @@ class resnet18:
                  filename_stem: str = "rn18mc",
                  filename_suffix: str = "",
                  model = models.resnet18(weights="ResNet18_Weights.DEFAULT"),
-                 state_dict: Union[None, Dict[str, torch.Tensor]] = None, # From typing import Dict, Union
+                 state_dict: Union[None, Dict[str, torch.Tensor]] = None, # from typing import Dict, Union
                  epoch_losses: dict = None,
                 ) -> None:
-        self.df = df
+        
+        self.df = df 
         self.train_set = train_set
-        self.dxs = dxs
+        self.val_set = val_set
         self.label_codes = label_codes
+        # Set up self._df_train (new attribute)---depends on the type of input:
+        if isinstance(train_set, pd.DataFrame):
+            self._df_train = train_set
+        elif isinstance(train_set, list):
+            self._df_train = self.df[self.df["set"].isin(train_set)]
+        elif isinstance(train_set, str):
+            self._df_train = self.df[self.df["set"] == train_set]
+        else:
+            raise ValueError("train_set must be either a DataFrame, a list (e.g. [\'t1\',\'ta\'], or a string (e.g. \'t1'\).")
+        
+        # Now the same for self._df_val (new attribute):
+        if isinstance(val_set, pd.DataFrame):
+            self._df_val = val_set
+        elif isinstance(val_set, list):
+            self._df_val = self.df[self.df["set"].isin(val_set)]
+        elif isinstance(val_set, str):
+            self._df_val = self.df[self.df["set"] == val_set]
+        else:
+            raise ValueError("val_set must be either a DataFrame, a list (e.g. [\'v1\',\'va\'], or a string (e.g. \'v1'\).")            
+        
+        # Continuing...
         self.data_dir = data_dir
         self.model_dir = model_dir
         self.transform = transform
@@ -224,24 +95,29 @@ class resnet18:
         self.filename_suffix = filename_suffix
         self.model = model
         self.state_dict = state_dict
-        self.epoch_losses = epoch_losses      
+        self.epoch_losses = epoch_losses 
         
-    def construct_filename(self) -> str:
+        self.construct_filename()
+        
+    def construct_filename(self) -> None:
         # To construct a string for the filename (for saving)
-        if "ta" in self.train_set:
-            tcode = "ta"
-        else:
-            tcode = "t1"
+        try:
+            if "ta" in self._df_train["set"].unique():
+                tcode = "ta"
+            else:
+                tcode = "t1"
+        except:
+            tcode = ""
         if self.filename_suffix == "":
             # So that the chance of over-writing an existing file is about 1/900...
             self.filename_suffix = str(np.random.randint(100, 1000))
-        filename = "_".join([self.filename_stem, tcode, str(self.epochs) + "e", self.filename_suffix])   
-        return filename
+        # New attribute
+        self._filename = "_".join([self.filename_stem, tcode, str(self.epochs) + "e", self.filename_suffix]) 
         
     def train(self) -> None:
         # Define DataLoader for batch processing
-        train_set = image_n_label(self.df, self.label_codes, self.train_set, self.data_dir, self.transform)        
-        dataloader = DataLoader(train_set, batch_size = self.batch_size, shuffle = True)
+        training_data = image_n_label(self._df_train, self.data_dir, self.transform)        
+        dataloader = DataLoader(training_data, batch_size = self.batch_size, shuffle = True)
 
         # Load the ResNet18 model 
         model = self.model
@@ -285,8 +161,8 @@ class resnet18:
             # Validation step        
 
             # Define DataLoader for batch processing for validation set
-            val_set = image_n_label(self.df, self.label_codes, ["v1"], self.data_dir, self.transform)
-            val_dataloader = DataLoader(val_set, batch_size = self.batch_size, shuffle = False)  # No need to shuffle for validation        
+            validation_data = image_n_label(self._df_val, self.data_dir, self.transform)
+            val_dataloader = DataLoader(validation_data, batch_size = self.batch_size, shuffle = False)  # No need to shuffle for validation        
 
             # Set model to evaluation mode
             model.eval() 
@@ -305,9 +181,9 @@ class resnet18:
 
             print(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss: {val_epoch_loss:.4f}")
 
-        filename = resnet18.construct_filename(self)
+#         filename = resnet18.construct_filename(self)
         # Now save the model
-        file_path = self.model_dir.joinpath(filename + ".pth")
+        file_path = self.model_dir.joinpath(self._filename + ".pth")
         print(f"Saving model.state_dict() as {file_path}.")
         torch.save(model.state_dict(), file_path)
         
@@ -316,24 +192,28 @@ class resnet18:
         self.epoch_losses = loss_dict
         self.state_dict = model.state_dict()
 
-    def inference(self, filename: str = None) -> pd.DataFrame:
+    def inference(self, df_infer: pd.DataFrame = None, filename: str = None) -> pd.DataFrame:
+        if df_infer is None:
+            df_infer = self.df
         # Define DataLoader for batch processing
-        infer_set = image_n_label(self.df, self.label_codes, ["t1", "ta", "v1", "va"], self.data_dir, self.transform)
-        dataloader = DataLoader(infer_set, batch_size=self.batch_size, shuffle=False)
+        inference_data = image_n_label(df_infer, self.data_dir, self.transform)
+        dataloader = DataLoader(inference_data, batch_size=self.batch_size, shuffle=False)
         model = self.model
         # Load the model
         if self.state_dict is None:
             assert filename is not None, "state_dict attribute is None: provide a filename for loading."                
             try:
-                file_path = self.modeel_dir.joinpath(filename)
+                file_path = self.model_dir.joinpath(filename)
                 model.load_state_dict(torch.load(file_path))
                 try:
                     file_path = self.data_dir.joinpath(filename + ".pth")
                     model.load_state_dict(torch.load(file_path))
                 except Exception as e:
+                    file_path = self.data_dir.joinpath(filename + ".pth")
                     print(f"Error loading {file_path}: {e}.")                    
             except Exception as e:
-                    print(f"Error loading {file_path}: {e}.")
+                file_path = self.data_dir.joinpath(filename + ".pth")
+                print(f"Error loading {file_path}: {e}.")
                     
         # Set the model to evaluation mode
         model.eval()  
@@ -346,7 +226,7 @@ class resnet18:
             model = nn.DataParallel(model)
 
         # Dataframe to store image_id and prediction
-        cols = ["image_id"] + ["prob_" + label for label in self.label_codes.keys()]
+        cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
         image_id_prob = pd.DataFrame({col_name : pd.NA for col_name in cols}, index = [0])
         
         softmax = nn.Softmax(dim=1)
@@ -362,7 +242,7 @@ class resnet18:
                 series_dict = { }
                 series_dict["image_id"] = pd.Series(image_ids)#, name = "image_id")
 
-                for idx, label in enumerate(self.label_codes.keys()):
+                for idx, label in enumerate(self.label_codes.values()):
                     series_dict["prob_" + label] = pd.Series(probabilities[:,idx])
                 
                 batch_df = pd.DataFrame(series_dict)
@@ -371,4 +251,28 @@ class resnet18:
         
         image_id_prob = image_id_prob.dropna(subset=["image_id"])     
         
-        return image_id_prob                
+        return image_id_prob 
+    
+    def prediction(self, lesion_or_image_id: str, filename: str = None) -> Union[None, pd.DataFrame]:
+        try:
+            if lesion_or_image_id[0] == "I":
+                dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(deep=True)
+            elif lesion_or_image_id[0] == "H":
+                dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(deep=True)
+            else:
+                raise ValueError(f"Invalid ID: {lesion_or_image_id}")
+        except KeyError as ke:
+            raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
+        except Exception as e:
+            raise ValueError(f"Error processing ID: {e}")
+
+        output = self.inference(dataframe, filename)
+
+        return output            
+    
+    def get_hidden_attributes(self) -> Dict[str, Union[str, pd.DataFrame]]:
+        return {
+            "_df_train": self._df_train,
+            "_df_val": self._df_val,
+            "_filename": self._filename,
+        }    
