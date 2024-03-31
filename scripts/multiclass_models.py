@@ -256,16 +256,21 @@ class resnet18:
         # Iterate through the DataLoader and make predictions
         with torch.no_grad():
             for images, labels, image_ids in dataloader:
+                # Send input tensor to device
+                images = images.to(device)
                 # Make predictions using the model
                 outputs = model(images)
                 # Apply softmax to get probabilities                
                 probabilities = softmax(outputs)
                 
+                # Move probabilities to CPU before converting to NumPy array
+                probabilities_cpu = probabilities.cpu().numpy()
+        
                 series_dict = { }
                 series_dict["image_id"] = pd.Series(image_ids)
 
                 for idx, label in enumerate(self.label_codes.values()):
-                    series_dict["prob_" + label] = pd.Series(probabilities[:,idx])
+                    series_dict["prob_" + label] = pd.Series(probabilities_cpu[:,idx])
                 
                 batch_df = pd.DataFrame(series_dict)
                 
