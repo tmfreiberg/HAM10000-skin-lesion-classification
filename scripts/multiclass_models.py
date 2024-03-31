@@ -17,11 +17,12 @@ from torch.utils.data import DataLoader, Dataset
 
                 
 class image_n_label:
-    def __init__(self, df: pd.DataFrame, label_codes: dict, data_dir: Path, transform=None) -> (Image, str, str):
+    def __init__(self, df: pd.DataFrame, label_codes: dict, data_dir: Path, transform=None, Print: bool = False) -> (Image, str, str):
         self.df = df[["image_id", "label"]].copy() # self.df = df
         self.label_codes = label_codes
         self.data_dir = data_dir
         self.transform = transform
+        self.Print = Print
         # We need to reset the index because...KeyError....        
         self.df.reset_index(inplace=True)
         # But this eventually throws ValueError: cannot insert level_0, already exists...
@@ -35,16 +36,19 @@ class image_n_label:
     def __getitem__(self, idx):
         img_name = self.data_dir.joinpath(self.df.loc[idx, "image_id"] + ".jpg")  
         image = Image.open(img_name)
-#         label = self.df.loc[idx, "label"]
+        code = self.df.loc[idx, "label"]
 #         image_id = self.df.loc[idx, "image_id"]
          # One-hot encoding the labels
         label = torch.zeros(len(self.label_codes))
-        label[self.df.loc[idx, "label"]] = 1
+#         label[self.df.loc[idx, "label"]] = 1
+        label[code] = 1
         image_id = self.df.loc[idx, "image_id"]
             
         if self.transform:
             image = self.transform(image)
 
+        if self.Print:
+            print(f"image_id, label, ohe-label: {image_id}, {code}, {label}")
         return image, label, image_id
     
 class resnet18:
@@ -61,6 +65,7 @@ class resnet18:
                  base_learning_rate: float = 0.001,
                  filename_stem: str = "rn18mc",
                  filename_suffix: str = "",
+                 Print: bool = False,                 
                  model = models.resnet18(weights="ResNet18_Weights.DEFAULT"),
                  state_dict: Union[None, Dict[str, torch.Tensor]] = None, # from typing import Dict, Union
                  epoch_losses: dict = None,
@@ -99,6 +104,7 @@ class resnet18:
         self.base_learning_rate = base_learning_rate
         self.filename_stem = filename_stem
         self.filename_suffix = filename_suffix
+        self.Print = Print        
         self.model = model
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses 
@@ -123,7 +129,7 @@ class resnet18:
     def train(self) -> None:
         # Define DataLoader for batch processing
 #         training_data = image_n_label(self._df_train,self.data_dir, self.transform)
-        training_data = image_n_label(self._df_train, self.label_codes, self.data_dir, self.transform)        
+        training_data = image_n_label(self._df_train, self.label_codes, self.data_dir, self.transform, self.Print)        
         dataloader = DataLoader(training_data, batch_size = self.batch_size, shuffle = True)
 
         # Load the ResNet18 model 
@@ -155,7 +161,11 @@ class resnet18:
                 images, labels = images.to(device), labels.to(device)
                 optimizer.zero_grad()
                 outputs = model(images)
-                loss = criterion(outputs.squeeze(), labels)
+#                 loss = criterion(outputs.squeeze(), labels)
+                loss = criterion(outputs, labels)
+                if self.Print:
+                    print(f"outputs.shape: {outputs.shape}")
+                    print(f"loss: {loss}")
 #                 loss = criterion(outputs.squeeze(), labels.long())
                 # Getting "RuntimeError: size mismatch (got input: [5], target: [1])", but not when training on test batches of size 64/128. 
                 loss.backward()
@@ -171,18 +181,24 @@ class resnet18:
 
             # Define DataLoader for batch processing for validation set
 #             validation_data = image_n_label(self._df_val, self.data_dir, self.transform)
-            validation_data = image_n_label(self._df_val, self.label_codes, self.data_dir, self.transform)
+            validation_data = image_n_label(self._df_val, self.label_codes, self.data_dir, self.transform, self.Print)
             val_dataloader = DataLoader(validation_data, batch_size = self.batch_size, shuffle = False)  # No need to shuffle for validation        
 
             # Set model to evaluation mode
+            if self.Print:
+                print("Validating...")
             model.eval() 
             val_running_loss = 0.0
+            val_epoch_loss = -1
             with torch.no_grad():  # Disable gradient calculation during validation
                 for val_images, val_labels, _ in val_dataloader:
                     val_images, val_labels = val_images.to(device), val_labels.to(device)
                     val_outputs = model(val_images)
 #                     val_loss = criterion(val_outputs.squeeze(), val_labels.long())
-                    val_loss = criterion(val_outputs.squeeze(), val_labels)
+                    val_loss = criterion(val_outputs, val_labels)
+                    if self.Print:
+                        print(f"outputs.shape: {outputs.shape}")
+                        print(f"val_loss: {val_loss}")
                     val_running_loss += val_loss.item()
 
                     # Calculate validation loss for the epoch
@@ -202,28 +218,24 @@ class resnet18:
         self.epoch_losses = loss_dict
         self.state_dict = model.state_dict()
 
-    def inference(self, df_infer: pd.DataFrame = None, filename: str = None) -> pd.DataFrame:
+    def inference(self, df_infer: pd.DataFrame = None, filename: str = None, Print: bool = False) -> pd.DataFrame:
         if df_infer is None:
             df_infer = self.df
         # Define DataLoader for batch processing
 #         inference_data = image_n_label(df_infer, self.data_dir, self.transform)
-        inference_data = image_n_label(df_infer, self.label_codes, self.data_dir, self.transform)
+        inference_data = image_n_label(df_infer, self.label_codes, self.data_dir, self.transform, self.Print)
         dataloader = DataLoader(inference_data, batch_size=self.batch_size, shuffle=False)
         model = self.model
         # Load the model
         if self.state_dict is None:
-            assert filename is not None, "state_dict attribute is None: provide a filename for loading."                
-            try:
+            assert filename is not None, "state_dict attribute is None: provide a filename for loading."  
+            if filename.endswith(".pth"):
                 file_path = self.model_dir.joinpath(filename)
-                model.load_state_dict(torch.load(file_path))
-                try:
-                    file_path = self.data_dir.joinpath(filename + ".pth")
-                    model.load_state_dict(torch.load(file_path))
-                except Exception as e:
-                    file_path = self.data_dir.joinpath(filename + ".pth")
-                    print(f"Error loading {file_path}: {e}.")                    
+            else:
+                file_path = self.model_dir.joinpath(filename + ".pth")
+            try:
+                model.load_state_dict(torch.load(file_path))                  
             except Exception as e:
-                file_path = self.data_dir.joinpath(filename + ".pth")
                 print(f"Error loading {file_path}: {e}.")
                     
         # Set the model to evaluation mode
