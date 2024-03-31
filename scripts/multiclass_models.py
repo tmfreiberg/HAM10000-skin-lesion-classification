@@ -17,12 +17,17 @@ from torch.utils.data import DataLoader, Dataset
 
                 
 class image_n_label:
-    def __init__(self, df: pd.DataFrame, data_dir: Path, transform=None) -> (Image, str, str):
-        self.df = df
+    def __init__(self, df: pd.DataFrame, label_codes: dict, data_dir: Path, transform=None) -> (Image, str, str):
+        self.df = df[["image_id", "label"]].copy() # self.df = df
+        self.label_codes = label_codes
         self.data_dir = data_dir
         self.transform = transform
         # We need to reset the index because...KeyError....        
         self.df.reset_index(inplace=True)
+        # But this eventually throws ValueError: cannot insert level_0, already exists...
+        # Replacing self.df = df above with self.df = df.copy() seems to resolve this, but this costs time and memory.
+        # Probably should think about a more efficient way to do this. 
+        # Well, we just need image_id and label here, so... just copy those two columns... 
 
     def __len__(self):
         return self.df.shape[0]
@@ -30,10 +35,11 @@ class image_n_label:
     def __getitem__(self, idx):
         img_name = self.data_dir.joinpath(self.df.loc[idx, "image_id"] + ".jpg")  
         image = Image.open(img_name)
-#         dx = self.df.loc[idx, "dx"]
-#         label_code = self.label_dict[dx]
-        label = self.df.loc[idx, "label"]
-#         label_word = self.label_codes[label]
+#         label = self.df.loc[idx, "label"]
+#         image_id = self.df.loc[idx, "image_id"]
+         # One-hot encoding the labels
+        label = torch.zeros(len(self.label_codes))
+        label[self.df.loc[idx, "label"]] = 1
         image_id = self.df.loc[idx, "image_id"]
             
         if self.transform:
@@ -116,7 +122,8 @@ class resnet18:
         
     def train(self) -> None:
         # Define DataLoader for batch processing
-        training_data = image_n_label(self._df_train, self.data_dir, self.transform)        
+#         training_data = image_n_label(self._df_train,self.data_dir, self.transform)
+        training_data = image_n_label(self._df_train, self.label_codes, self.data_dir, self.transform)        
         dataloader = DataLoader(training_data, batch_size = self.batch_size, shuffle = True)
 
         # Load the ResNet18 model 
@@ -148,7 +155,9 @@ class resnet18:
                 images, labels = images.to(device), labels.to(device)
                 optimizer.zero_grad()
                 outputs = model(images)
-                loss = criterion(outputs.squeeze(), labels.long())
+                loss = criterion(outputs.squeeze(), labels)
+#                 loss = criterion(outputs.squeeze(), labels.long())
+                # Getting "RuntimeError: size mismatch (got input: [5], target: [1])", but not when training on test batches of size 64/128. 
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -161,7 +170,8 @@ class resnet18:
             # Validation step        
 
             # Define DataLoader for batch processing for validation set
-            validation_data = image_n_label(self._df_val, self.data_dir, self.transform)
+#             validation_data = image_n_label(self._df_val, self.data_dir, self.transform)
+            validation_data = image_n_label(self._df_val, self.label_codes, self.data_dir, self.transform)
             val_dataloader = DataLoader(validation_data, batch_size = self.batch_size, shuffle = False)  # No need to shuffle for validation        
 
             # Set model to evaluation mode
@@ -171,7 +181,8 @@ class resnet18:
                 for val_images, val_labels, _ in val_dataloader:
                     val_images, val_labels = val_images.to(device), val_labels.to(device)
                     val_outputs = model(val_images)
-                    val_loss = criterion(val_outputs.squeeze(), val_labels.long())
+#                     val_loss = criterion(val_outputs.squeeze(), val_labels.long())
+                    val_loss = criterion(val_outputs.squeeze(), val_labels)
                     val_running_loss += val_loss.item()
 
                     # Calculate validation loss for the epoch
@@ -181,7 +192,6 @@ class resnet18:
 
             print(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss: {val_epoch_loss:.4f}")
 
-#         filename = resnet18.construct_filename(self)
         # Now save the model
         file_path = self.model_dir.joinpath(self._filename + ".pth")
         print(f"Saving model.state_dict() as {file_path}.")
@@ -196,7 +206,8 @@ class resnet18:
         if df_infer is None:
             df_infer = self.df
         # Define DataLoader for batch processing
-        inference_data = image_n_label(df_infer, self.data_dir, self.transform)
+#         inference_data = image_n_label(df_infer, self.data_dir, self.transform)
+        inference_data = image_n_label(df_infer, self.label_codes, self.data_dir, self.transform)
         dataloader = DataLoader(inference_data, batch_size=self.batch_size, shuffle=False)
         model = self.model
         # Load the model
@@ -237,10 +248,9 @@ class resnet18:
                 outputs = model(images)
                 # Apply softmax to get probabilities                
                 probabilities = softmax(outputs)
-#                 probabilities_np = probabilities.cpu().numpy().flatten()
                 
                 series_dict = { }
-                series_dict["image_id"] = pd.Series(image_ids)#, name = "image_id")
+                series_dict["image_id"] = pd.Series(image_ids)
 
                 for idx, label in enumerate(self.label_codes.values()):
                     series_dict["prob_" + label] = pd.Series(probabilities[:,idx])
