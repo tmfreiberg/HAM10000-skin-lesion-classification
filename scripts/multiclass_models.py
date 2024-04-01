@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, Dataset
                 
 class image_n_label:
     def __init__(self, df: pd.DataFrame, label_codes: dict, data_dir: Path, transform=None, Print: bool = False) -> (Image, str, str):
-        self.df = df[["image_id", "label"]].copy() # self.df = df
+        self.df = df[["image_id", "label"]].copy() 
         self.label_codes = label_codes
         self.data_dir = data_dir
         self.transform = transform
@@ -37,10 +37,8 @@ class image_n_label:
         img_name = self.data_dir.joinpath(self.df.loc[idx, "image_id"] + ".jpg")  
         image = Image.open(img_name)
         code = self.df.loc[idx, "label"]
-#         image_id = self.df.loc[idx, "image_id"]
-         # One-hot encoding the labels
+        # One-hot encoding the labels
         label = torch.zeros(len(self.label_codes))
-#         label[self.df.loc[idx, "label"]] = 1
         label[code] = 1
         image_id = self.df.loc[idx, "image_id"]
             
@@ -65,7 +63,7 @@ class resnet18:
                  base_learning_rate: float = 0.001,
                  filename_stem: str = "rn18mc",
                  filename_suffix: str = "",
-                 Print: bool = False,                 
+                 Print: bool = False,                   
                  model = models.resnet18(weights="ResNet18_Weights.DEFAULT"),
                  state_dict: Union[None, Dict[str, torch.Tensor]] = None, # from typing import Dict, Union
                  epoch_losses: dict = None,
@@ -120,15 +118,27 @@ class resnet18:
                 tcode = "t1"
         except:
             tcode = ""
-        if self.filename_suffix == "":
-            # So that the chance of over-writing an existing file is about 1/900...
-            self.filename_suffix = str(np.random.randint(100, 1000))
+
+        # Initial filename without suffix
+        base_filename = "_".join([self.filename_stem, tcode, str(self.epochs) + "e"])
+
+        # Find a unique filename by incrementing a counter
+        counter = 0
+        while True:
+            filename = base_filename + f"_{self.filename_suffix}_{counter:02d}"
+            filepath = self.model_dir.joinpath(filename)       
+
+            # Check if the file already exists
+            if not os.path.exists(filepath):
+                break  # Unique filename found
+            else:
+                counter += 1  # Increment counter for next attempt
+
         # New attribute
-        self._filename = "_".join([self.filename_stem, tcode, str(self.epochs) + "e", self.filename_suffix]) 
+        self._filename = filename        
         
     def train(self) -> None:
         # Define DataLoader for batch processing
-#         training_data = image_n_label(self._df_train,self.data_dir, self.transform)
         training_data = image_n_label(self._df_train, self.label_codes, self.data_dir, self.transform, self.Print)        
         dataloader = DataLoader(training_data, batch_size = self.batch_size, shuffle = True)
 
@@ -161,13 +171,10 @@ class resnet18:
                 images, labels = images.to(device), labels.to(device)
                 optimizer.zero_grad()
                 outputs = model(images)
-#                 loss = criterion(outputs.squeeze(), labels)
                 loss = criterion(outputs, labels)
                 if self.Print:
                     print(f"outputs.shape: {outputs.shape}")
                     print(f"loss: {loss}")
-#                 loss = criterion(outputs.squeeze(), labels.long())
-                # Getting "RuntimeError: size mismatch (got input: [5], target: [1])", but not when training on test batches of size 64/128. 
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -178,9 +185,7 @@ class resnet18:
             loss_dict["train_loss"][epoch] = epoch_loss
 
             # Validation step        
-
             # Define DataLoader for batch processing for validation set
-#             validation_data = image_n_label(self._df_val, self.data_dir, self.transform)
             validation_data = image_n_label(self._df_val, self.label_codes, self.data_dir, self.transform, self.Print)
             val_dataloader = DataLoader(validation_data, batch_size = self.batch_size, shuffle = False)  # No need to shuffle for validation        
 
@@ -194,7 +199,6 @@ class resnet18:
                 for val_images, val_labels, _ in val_dataloader:
                     val_images, val_labels = val_images.to(device), val_labels.to(device)
                     val_outputs = model(val_images)
-#                     val_loss = criterion(val_outputs.squeeze(), val_labels.long())
                     val_loss = criterion(val_outputs, val_labels)
                     if self.Print:
                         print(f"outputs.shape: {outputs.shape}")
@@ -218,25 +222,32 @@ class resnet18:
         self.epoch_losses = loss_dict
         self.state_dict = model.state_dict()
 
-    def inference(self, df_infer: pd.DataFrame = None, filename: str = None, Print: bool = False) -> pd.DataFrame:
+    def inference(self, 
+                  df_infer: pd.DataFrame = None, 
+                  filename: str = None, 
+                  Print: bool = False, 
+                  save: bool = False) -> pd.DataFrame:
         if df_infer is None:
             df_infer = self.df
+            
         # Define DataLoader for batch processing
-#         inference_data = image_n_label(df_infer, self.data_dir, self.transform)
         inference_data = image_n_label(df_infer, self.label_codes, self.data_dir, self.transform, self.Print)
         dataloader = DataLoader(inference_data, batch_size=self.batch_size, shuffle=False)
+        
         model = self.model
         # Load the model
         if self.state_dict is None:
             assert filename is not None, "state_dict attribute is None: provide a filename for loading."  
             if filename.endswith(".pth"):
-                file_path = self.model_dir.joinpath(filename)
-            else:
-                file_path = self.model_dir.joinpath(filename + ".pth")
+                filename = filename[:-4]
+            file_path_pth = self.model_dir.joinpath(filename + ".pth")
+            file_path_csv = self.model_dir.joinpath(filename + "_infer.csv")
             try:
-                model.load_state_dict(torch.load(file_path))                  
+                model.load_state_dict(torch.load(file_path_pth))                  
             except Exception as e:
-                print(f"Error loading {file_path}: {e}.")
+                print(f"Error loading {file_path_pth}: {e}.")
+        else:
+            file_path_csv = self.model_dir.joinpath(self._filename + "_infer.csv")
                     
         # Set the model to evaluation mode
         model.eval()  
@@ -276,11 +287,34 @@ class resnet18:
                 
                 image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)  
         
-        image_id_prob = image_id_prob.dropna(subset=["image_id"])     
+        # This dataframe contains "image_id" column and a probability column for each class.
+        image_id_prob = image_id_prob.dropna(subset=["image_id"])  
         
-        return image_id_prob 
+        # Merge it with the underlying metadata dataframe (or whatever was passed as df_infer).
+        try:
+            inference_df = pd.merge(df_infer, image_id_prob, on="image_id", how="left")
+        except Exception as e:
+            print(f"Error merging inference dataframe with input dataframe: {e}")            
+        
+        # Add this new dataframe with inferences as a hidden attribute to self; also, save it as a csv file.
+        if save:
+            try:
+                print("Assigning inference dataframe to new attribute self._inference_df.")
+                # New attribute
+                self._inference_df = inference_df 
+                try:
+                    print(f"Saving dataframe as {file_path_csv}")
+                    inference_df.to_csv(file_path_csv, index=False)
+                except Exception as e:
+                    print(f"Error assigning inference dataframe to new attribute self._inference_df: {e}")
+            except Exception as e:
+                print(f"Error saving dataframe to csv file: {e}")
+        
+        # Return the inference dataframe.
+        return inference_df 
     
     def prediction(self, lesion_or_image_id: str, filename: str = None) -> Union[None, pd.DataFrame]:
+        # If we just want to make a prediction for one or a few lesions/images:
         try:
             if lesion_or_image_id[0] == "I":
                 dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(deep=True)
@@ -292,9 +326,10 @@ class resnet18:
             raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
         except Exception as e:
             raise ValueError(f"Error processing ID: {e}")
-
+        
+        # Now just call inference on this mini-dataframe:
         output = self.inference(dataframe, filename)
-
+        
         return output            
     
     def get_hidden_attributes(self) -> Dict[str, Union[str, pd.DataFrame]]:
