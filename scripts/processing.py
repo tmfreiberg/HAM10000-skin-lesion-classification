@@ -84,7 +84,7 @@ class process:
                 self._label_codes.update({i + 1: dx for i, dx in enumerate(care_about)})              
             # New attribute
             self._num_labels = len(self._label_dict)                
-            print("Created label_dict (maps labels to indices).")
+            print("Created _label_dict (maps labels to indices).")
         except Exception as e:
             print(f"Error creating label_dict: {e}")
 

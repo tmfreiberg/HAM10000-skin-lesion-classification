@@ -121,7 +121,6 @@ class resnet18:
         self.model = model
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses
-
         self.construct_filename()
 
     def construct_filename(self) -> None:
