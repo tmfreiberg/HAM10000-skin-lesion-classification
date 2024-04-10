@@ -16,6 +16,7 @@ class process:
         keep_first: bool = False,
         stratified: bool = True,
         to_classify: list = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"],
+        sample_size: Union[None, dict] = None,
     ) -> None:
 
         self.data_dir = data_dir
@@ -28,6 +29,7 @@ class process:
         self.keep_first = keep_first
         self.stratified = stratified
         self.to_classify = to_classify
+        self.sample_size = sample_size
         # Load dataframe
         self.load()
         # Insert 'num_images' column
@@ -38,6 +40,9 @@ class process:
         self.insert_label_column()
         # Insert 'set' column indicating train/val assignment
         self.train_val_split()
+        # Balance classes
+        if self.sample_size is not None:
+            self.balance()
     
     def load(self):
         # Load metadata.csv into a dataframe.
@@ -314,7 +319,94 @@ class process:
                 print(
                     f"Total {across}: {col.shape[0]} ({100*col.shape[0]/tot_images:.2f}% of all {across}).\n"
                 )
+                
+    def balance(self) -> None:
+        print("\nBalancing classes".upper(), "(self._df_balanced)")
+        df = self._df_train_a.copy()
+        sample_image_list = []
 
+        if "other" in self.sample_size.keys():
+            for i, dx in self._label_codes.items():
+                try: # if dx is not a key of self.sample_size, it will simply be skipped
+                    N = self.sample_size[dx]
+                    class_df = df[df['label'] == i].copy()
+                    D = class_df['lesion_id'].nunique()
+                    Q, R = divmod(N,D) 
+                    # N = Q*D + R
+                    # We want Q images for each of the D distinct lesion_ids, plus a further one image for R distinct lesion_ids.
+                    # Consider a lesion_id and suppose we have num_images of it.
+                    class_df['q'], class_df['r'] = divmod(Q,class_df['num_images']) 
+                    # Q = q*num_images + r. We want q copies of each image corresponding to this lesion_id, plus a further one copy of r of them.
+                    x = class_df.apply(lambda row: [row['image_id']] * row['q'], axis=1)
+                    # Add these to the list
+                    sample_image_list.extend([item for sublist in x for item in sublist])
+                    # Now for the r 'leftover' images for each lesion
+                    y_df = pd.DataFrame(columns=class_df.columns)
+                    y_df = class_df.groupby('lesion_id').apply(lambda group: group.sample(n=group['r'].iloc[0])).reset_index(drop=True)
+                    y = y_df['image_id'].tolist()
+                    # Add them to the list
+                    sample_image_list.extend(y)
+                    # And we still one image for those remaining R lesion_ids.
+                    distinct_lesion_ids = class_df[class_df['label'] == i]['lesion_id'].drop_duplicates()
+                    remainder_lesion_ids = distinct_lesion_ids.sample(n=R, random_state=self.seed, replace=False)
+                    merged_df = pd.merge(class_df, remainder_lesion_ids.rename('lesion_id'), on='lesion_id')
+                    selected_images = merged_df.groupby('lesion_id')['image_id'].apply(lambda img: np.random.choice(img)).tolist()
+                    # Add them to the list
+                    sample_image_list.extend(selected_images)
+                except:
+                    pass
+        else:
+            for dx, i in self._label_dict.items():
+                try: # if dx is not a key of self.sample_size, it will simply be skipped
+                    N = self.sample_size[dx]
+                    class_df = df[df['dx'] == dx].copy()
+                    D = class_df['lesion_id'].nunique()
+                    Q, R = divmod(N,D) 
+                    # N = Q*D + R
+                    # We want Q images for each of the D distinct lesion_ids, plus a further one image for R distinct lesion_ids.
+                    # Consider a lesion_id and suppose we have num_images of it.
+                    class_df['q'], class_df['r'] = divmod(Q,class_df['num_images']) 
+                    # Q = q*num_images + r. We want q copies of each image corresponding to this lesion_id, plus a further one copy of r of them.
+                    x = class_df.apply(lambda row: [row['image_id']] * row['q'], axis=1)
+                    # Add these to the list
+                    sample_image_list.extend([item for sublist in x for item in sublist])
+                    # Now for the r 'leftover' images for each lesion
+                    y_df = pd.DataFrame(columns=class_df.columns)
+                    y_df = class_df.groupby('lesion_id').apply(lambda group: group.sample(n=group['r'].iloc[0])).reset_index(drop=True)
+                    y = y_df['image_id'].tolist()
+                    # Add them to the list
+                    sample_image_list.extend(y)
+                    # And we still one image for those remaining R lesion_ids.
+                    distinct_lesion_ids = class_df[class_df['label'] == i]['lesion_id'].drop_duplicates()
+                    remainder_lesion_ids = distinct_lesion_ids.sample(n=R, random_state=self.seed, replace=False)
+                    merged_df = pd.merge(class_df, remainder_lesion_ids.rename('lesion_id'), on='lesion_id')
+                    selected_images = merged_df.groupby('lesion_id')['image_id'].apply(lambda img: np.random.choice(img)).tolist()
+                    # Add them to the list
+                    sample_image_list.extend(selected_images)
+                except:
+                    pass
+
+        # Group sample_image_list by values and count the occurrences
+        sample_image_list_counts = pd.Series(sample_image_list).groupby(pd.Series(sample_image_list)).size().reset_index(name='img_mult')
+
+        # Merge df with sample_image_list_counts based on 'image_id'
+        balanced_df = pd.merge(df, sample_image_list_counts, left_on='image_id', right_on='index', how='inner')
+
+        # Expand rows based on 'img_mult' column
+        balanced_df = balanced_df.loc[balanced_df.index.repeat(balanced_df['img_mult'])].reset_index(drop=True)
+
+        # Drop the temporary 'index' columns
+        balanced_df.drop(['index'], axis=1, inplace=True)
+
+        # Count occurrences of each value in 'lesion_id'
+        lesion_id_multiplicity = balanced_df['lesion_id'].value_counts()
+
+        # Insert 'multiplicity' column into DataFrame
+        balanced_df.insert(loc=1, column='lesion_mult', value=balanced_df['lesion_id'].map(lesion_id_multiplicity))
+
+        new_column_order = list(balanced_df.columns)[:4] + ['img_mult'] + list(balanced_df.columns)[4:-1]
+        # New attribute
+        self._df_balanced = balanced_df[new_column_order]        
                 
     def get_hidden_attributes(self) -> Dict[str, Union[Path, str, dict, int, pd.DataFrame]]:
         return {
@@ -326,6 +418,7 @@ class process:
             "_df_train_a": self._df_train_a,
             "_df_val1": self._df_val1,
             "_df_val_a": self._df_val_a,
-            "_df_sample_batch": self._df_sample_batch
+            "_df_sample_batch": self._df_sample_batch,
+            "_df_balanced": self._df_balanced,
         }
     
