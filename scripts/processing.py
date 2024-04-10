@@ -89,7 +89,7 @@ class process:
                 self._label_codes.update({i + 1: dx for i, dx in enumerate(care_about)})              
             # New attribute
             self._num_labels = len(self._label_dict)                
-            print("Created _label_dict (maps labels to indices).")
+            print("Created self._label_dict (maps labels to indices).")
         except Exception as e:
             print(f"Error creating label_dict: {e}")
 
@@ -321,7 +321,7 @@ class process:
                 )
                 
     def balance(self) -> None:
-        print("\nBalancing classes".upper(), "(self._df_balanced)")
+        print("Balancing classes in training set.")
         df = self._df_train_a.copy()
         sample_image_list = []
 
@@ -403,7 +403,20 @@ class process:
 
         # Insert 'multiplicity' column into DataFrame
         balanced_df.insert(loc=1, column='lesion_mult', value=balanced_df['lesion_id'].map(lesion_id_multiplicity))
-
+        
+        # Add these two new columns to self._df_val_a as well, because we are about to merge it with balanced_df.
+        # (Just to have everything in one dataframe, for convenience.)
+        print("Re-combining balanced training set with validation set self._df_val_a so that everything is in one convenient dataframe: self._df_balanced.")
+        val_a = self._df_val_a.copy()
+        lesion_id_multiplicity = val_a['lesion_id'].value_counts() # This will be the same as 'num_images' 
+        image_id_multiplicity = val_a['image_id'].value_counts() # This will be 1
+        val_a.insert(loc=1, column='lesion_mult', value=val_a['lesion_id'].map(lesion_id_multiplicity))
+        val_a.insert(loc=len(val_a.columns), column='img_mult', value=val_a['image_id'].map(image_id_multiplicity))
+        
+        # Now concatenate balanced_df with val_a
+        balanced_df = pd.concat([balanced_df, val_a], ignore_index=True)
+        
+        # Re-order the columns
         new_column_order = list(balanced_df.columns)[:4] + ['img_mult'] + list(balanced_df.columns)[4:-1]
         # New attribute
         self._df_balanced = balanced_df[new_column_order]        
