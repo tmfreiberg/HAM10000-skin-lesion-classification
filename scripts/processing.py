@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from IPython.display import display
+# from IPython.display import display
 from typing import Dict, Union
+from utils import display, print_header
 
 
 class process:
@@ -238,7 +239,19 @@ class process:
 
         # Finally, for convenience, we create a test dataframe (again a reference to self.df).
         # By "test" we mean something to test our code, not a "test set" for our models.
-        self._df_sample_batch = self.df.sample(n=64, random_state=self.seed)
+        # We'll call it a sample batch (but again not a batch as in a batch that goes into a dataloader for training).
+        # New attribute
+        self._df_sample_batch = pd.DataFrame()
+        for dx in self._df_train1['dx'].unique():
+            df = self._df_train1[self._df_train1['dx'] == dx]['lesion_id']
+            sampled_lesion_ids = np.random.choice(df, size=10, replace=False)
+            sampled_df = self._df_train_a[self._df_train_a['lesion_id'].isin(sampled_lesion_ids)]
+            self._df_sample_batch = pd.concat([self._df_sample_batch, sampled_df], ignore_index=True)
+        for dx in self._df_val1['dx'].unique():
+            df = self._df_val1[self._df_val1['dx'] == dx]['lesion_id']
+            sampled_lesion_ids = np.random.choice(df, size=3, replace=False)
+            sampled_df = self._df_val_a[self._df_val_a['lesion_id'].isin(sampled_lesion_ids)]
+            self._df_sample_batch = pd.concat([self._df_sample_batch, sampled_df], ignore_index=True)
 
     # DIAGNOSIS DISTRIBUTION FOR LESIONS AND IMAGES, AFTER TRAIN/VAL SPLIT
 
@@ -278,11 +291,7 @@ class process:
                 col = df[VA]["label"]
 
         # Print heading
-        print(
-            "=" * 45
-            + f"\nDistribution of {across} by diagnosis: {subset}\n".upper()
-            + "=" * 45
-        )
+        print_header(f"Distribution of {across} by diagnosis: {subset}")
         # Get the frequencies and place them in a dataframe
         dx_breakdown_dist = pd.concat(
             [col.value_counts(), col.value_counts(normalize=True).mul(100).round(2)],

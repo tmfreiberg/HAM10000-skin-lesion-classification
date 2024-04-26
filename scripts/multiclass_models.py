@@ -2,7 +2,8 @@ import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from IPython.display import display
+from utils import display
+# from IPython.display import display
 from PIL import Image
 
 import torch
@@ -15,6 +16,7 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
+from collections import OrderedDict
 
 class image_n_label:
     def __init__(
@@ -72,6 +74,7 @@ class resnet18:
         base_learning_rate: float = 0.001,
         filename_stem: str = "rn18mc",
         filename_suffix: str = "",
+        overwrite: Union[bool, None] = None,
         Print: bool = False,
         model=models.resnet18(weights="ResNet18_Weights.DEFAULT"),
         state_dict: Union[
@@ -117,6 +120,9 @@ class resnet18:
         self.base_learning_rate = base_learning_rate
         self.filename_stem = filename_stem
         self.filename_suffix = filename_suffix
+        self.overwrite = overwrite
+        if self.overwrite is None:
+            self.overwrite = False
         self.Print = Print
         self.model = model
         self.state_dict = state_dict
@@ -139,9 +145,9 @@ class resnet18:
 
         # Find a unique filename by incrementing a counter
         counter = 0
-        while True:
+        while not self.overwrite:
             filename = base_filename + f"_{self.filename_suffix}_{counter:02d}"
-            filepath = self.model_dir.joinpath(filename)
+            filepath = self.model_dir.joinpath(filename + ".pth")
 
             # Check if the file already exists
             if not os.path.exists(filepath):
@@ -150,7 +156,10 @@ class resnet18:
                 counter += 1  # Increment counter for next attempt
 
         # New attribute
-        self._filename = filename
+        if self.overwrite:
+            self._filename = base_filename + f"_{self.filename_suffix}_{counter:02d}" 
+        else:
+            self._filename = filename
 
     def train(self) -> None:
         # Define DataLoader for batch processing
@@ -387,4 +396,146 @@ class resnet18:
             "_df_train": self._df_train,
             "_df_val": self._df_val,
             "_filename": self._filename,
+            "_inference_df": self._inference_df,
         }
+
+
+'''
+END RESNET18 CLASS
+'''
+    
+def aggregate_probabilities(df: pd.DataFrame,
+                            method_dict: Union[None, dict] = None,
+                            prefix: str = 'prob_',
+                            ) -> pd.DataFrame:
+    
+    output = df.copy()
+    
+    if method_dict is None:
+        method_dict = { 'mean' : output.columns }
+    else:
+        method_dict['mean'] = [prefix + lesion for lesion in method_dict['mean'] if lesion in output.columns]
+        method_dict['max'] = [prefix + lesion for lesion in method_dict['max'] if lesion in output.columns]
+        method_dict['min'] = [prefix + lesion for lesion in method_dict['min'] if lesion in output.columns]
+    
+    mean_probs = output.groupby('lesion_id').mean()
+    max_probs = output.groupby('lesion_id').max()
+    min_probs = output.groupby('lesion_id').min()
+
+    for col in mean_probs.columns:
+        if col in method_dict['mean']:
+            output[col] = output['lesion_id'].map(mean_probs[col])
+        elif col in method_dict['max']:
+            output[col] = output['lesion_id'].map(max_probs[col])
+        elif col in method_dict['min']:
+            output[col] = output['lesion_id'].map(min_probs[col])
+    
+    return output        
+    
+def threshold(probabilities: pd.Series, 
+              threshold_dict_help: Union[OrderedDict,None],
+              threshold_dict_hinder: Union[OrderedDict,None],
+              prefix: str = 'prob_') -> pd.Series:   
+    if isinstance(threshold_dict_help, OrderedDict):
+        for dx, thres in threshold_dict_help.items():
+            if prefix + dx in probabilities.index and probabilities[prefix + dx] > thres:
+                probabilities[prefix + dx] = 1
+                break
+    if isinstance(threshold_dict_hinder, OrderedDict):
+        for dx, thres in threshold_dict_hinder.items():
+                if prefix + dx in probabilities.index and probabilities[prefix + dx] < thres:
+                    probabilities[prefix + dx] = 0
+                    break            
+    return probabilities
+
+def get_argmax(row: pd.DataFrame, 
+               prefix: str='prob_', 
+               threshold_dict_help: Union[OrderedDict,None] = None,
+               threshold_dict_hinder: Union[OrderedDict,None] = None,
+               inverse_label_codes=Union[dict,None]) -> Union[int, str]:
+    # Filter columns based on the prefix
+    prob_columns = [col for col in row.index if col.startswith(prefix)] #? why .index and not .columns? No, after applying .groupby, the grroupby column becomes the index of the resulting dataframe or something
+    probabilities = row[prob_columns].astype(float)
+    
+    probabilities = threshold(probabilities=probabilities, 
+                              threshold_dict_help=threshold_dict_help,
+                              threshold_dict_hinder=threshold_dict_hinder,
+                              prefix=prefix,)
+        
+    max_column = probabilities.idxmax()
+    dx = max_column.split('_')[1]  # Split the string and return the second part (after the prefix)
+    if inverse_label_codes:
+        return inverse_label_codes[dx]  # Return the label if inverse_label_codes is provided
+    else:
+        return dx  # Otherwise, return the code itself
+    
+def append_prediction(original_df: pd.DataFrame,
+                      probabilities_df: pd.DataFrame, 
+                      threshold_dict_help: Union[OrderedDict, None] = None,
+                      threshold_dict_hinder: Union[OrderedDict, None] = None,
+                      inverse_label_codes: Union[dict,None] = None,
+                      prefix: str = 'prob_',) -> pd.DataFrame:    
+    
+    # Make a copy of the original dataframe
+    output_df = original_df.copy()
+    
+    # Apply the 'get_argmax' function to the probabilities dataframe and append the result to the original
+    output_df['pred'] = probabilities_df.apply(get_argmax, 
+                                               prefix=prefix, 
+                                               threshold_dict_help=threshold_dict_help,
+                                               threshold_dict_hinder=threshold_dict_hinder,
+                                               inverse_label_codes=inverse_label_codes, 
+                                               axis=1)
+    return output_df
+
+def df_with_probabilities(model_or_path: Union[resnet18, Path],) -> pd.DataFrame:
+    if isinstance(model_or_path, resnet18):
+        instance = model_or_path
+        try:
+            if isinstance(instance._inference_df, pd.DataFrame):
+                return instance._inference_df
+            else:
+                try:
+                    filename_csv = instance._filename + "_infer.csv"
+                    file_path_csv = instance.model_dir.joinpath(filename_csv)
+                    instance._inference_df = pd.read_csv(file_path_csv)
+                    return instance._inference_df
+                except Exception as e:
+                    print(f"Error reading csv file {file_path_csv}: {e}")            
+                    return
+        except AttributeError as e:
+            print(f"{e}")          
+            try:
+                filename_csv = instance._filename + "_infer.csv"
+                file_path_csv = instance.model_dir.joinpath(filename_csv)
+                instance._inference_df = pd.read_csv(file_path_csv)
+                return instance._inference_df
+            except Exception as e:
+                print(f"Error reading csv file {file_path_csv}: {e}")            
+                return
+    elif isinstance(model_or_path, Path):
+        file_path_csv = model_or_path
+        try:
+            output_df = pd.read_csv(file_path_csv)
+        except Exception as e:
+            print(f"Error reading csv file {file_path_csv} : {e}")
+            return
+    else:
+        print("First argument must be an instance of a model class of a Path to a csv file.")
+        return
+    return output_df
+    
+def mode_with_random(x):
+    modes = x.mode()
+    if not modes.empty:
+        return modes[0]
+    else:
+        max_count = x.value_counts().max()
+        modes = x.value_counts()[x.value_counts() == max_count].index.tolist()
+        return np.random.choice(modes)
+
+def predictions_mode(df: pd.DataFrame, 
+                     pred_col: str = 'pred',) -> pd.DataFrame:
+    mode_df = df.groupby('lesion_id')[pred_col].agg(mode_with_random)
+    output = df.merge(mode_df, left_on='lesion_id', right_index=True, suffixes=('', '_mode')).drop('pred', axis=1)
+    return output
