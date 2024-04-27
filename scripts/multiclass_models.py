@@ -140,7 +140,15 @@ class cnn:
         if self.base_learning_rate is None:
             self.base_learning_rate = 1/1000
         if self.filename_stem is None:
-            self.filename_stem = "rn18"
+            if self.model is not None:
+                if isinstance(self.model, models.ResNet):
+                    self.filename_stem = "rn18"
+                elif isinstance(self.model, models.EfficientNet):
+                    self.filename_stem = "effnet"
+                else:
+                    self.filename_stem = "cnn"
+            else:
+                self.filename_stem = "cnn"
         if self.filename_suffix is None:
             self.filename_suffix = ""
         if self.overwrite is None:
@@ -188,6 +196,13 @@ class cnn:
         if self.code_test:
             if isinstance(self.source, process):
                 print_header("Code test mode")
+                to_print = ["- self.epochs set to 1",
+                            "self.Print set to True",
+                            "self.filename_suffix set to \'test\'",
+                            "self.overwrite set to True",
+                            "self.df_train, self.df_val1, self.df_val_a replaced with a small number of records",
+                            "Change code_test attribute to False and re-create/create new cnn instance after testing is done.\n"]
+                print("\n- ".join(to_print))
                 self.epochs = 1
                 self.Print = True
                 self.filename_suffix = "test"
@@ -374,7 +389,7 @@ class cnn:
                     loss_dict["val_a_loss"][epoch] = val_a_epoch_loss                    
 
             print(
-                f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss 1: {val_epoch_loss:.4f}, Validation Loss a: {val_a_epoch_loss:.4f}"
+                f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss 1: {val1_epoch_loss:.4f}, Validation Loss a: {val_a_epoch_loss:.4f}"
             )
 
         # Now save the model
@@ -525,7 +540,7 @@ class cnn:
 
         return output
 
-    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, models.ResNet, None]]:
+    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, models.ResNet, models.EfficientNet, None]]:
         attributes_dict = {
         "self.df": self.df,
         "self.df_train": self.df_train,
@@ -590,7 +605,7 @@ class cnn:
         attributes_dict = self.get_hidden_attributes()
         filtered_dict = {}
         for key, value in attributes_dict.items():
-            if isinstance(value, (str, int, float, bool, list, Path, transforms.Compose, dict)):
+            if isinstance(value, (str, int, float, bool, list, Path, transforms.Compose, dict, models.ResNet, models.EfficientNet)):
                 filtered_dict[key] = str(value)
         filepath = self.model_dir.joinpath(self._filename + "_attributes.json")
         # Save the filtered dictionary to a JSON file
@@ -600,7 +615,7 @@ class cnn:
 
 
 '''
-END RESNET18 CLASS
+END CNN CLASS
 '''
     
 def aggregate_probabilities(df: pd.DataFrame,
@@ -687,8 +702,8 @@ def append_prediction(original_df: pd.DataFrame,
                                                axis=1)
     return output_df
 
-def df_with_probabilities(model_or_path: Union[resnet18, Path],) -> pd.DataFrame:
-    if isinstance(model_or_path, resnet18):
+def df_with_probabilities(model_or_path: Union[cnn, Path],) -> pd.DataFrame:
+    if isinstance(model_or_path, cnn):
         instance = model_or_path
         try:
             if isinstance(instance._df_inference, pd.DataFrame):

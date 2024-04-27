@@ -105,7 +105,7 @@ class process:
         # Load metadata.csv into a dataframe.
         try:
             self.df = pd.read_csv(self._csv_file_path)
-            print(f"- Successfully loaded file '{self._csv_file_path}'.")
+            print(f"- Loaded file '{self._csv_file_path}'.")
         except Exception as e:
             print(f"Error loading file '{self._csv_file_path}': {e}")
             
