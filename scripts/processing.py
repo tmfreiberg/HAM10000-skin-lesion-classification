@@ -641,7 +641,7 @@ class process:
         self._df_sample_batch = pd.DataFrame()
         for dx in self.df_combined['dx'].unique():
             df = self.df_combined[(self.df_combined['dx'] == dx) & (self.df_combined['set'].isin(["t1","ta"]))]['lesion_id']
-            sampled_lesion_ids = np.random.choice(df, size=10, replace=False)
+            sampled_lesion_ids = np.random.choice(df, size=5, replace=False)
             sampled_df = self.df_combined[self.df_combined['lesion_id'].isin(sampled_lesion_ids)]
             self._df_sample_batch = pd.concat([self._df_sample_batch, sampled_df], ignore_index=True)
         for dx in self.df_combined['dx'].unique():
@@ -665,6 +665,6 @@ class process:
             "_df_sample_batch": self._df_sample_batch,
             "_df_balanced": self._df_balanced,
             "_expanded_val_df": self._df_expanded_val,
-            "_df_combined": self.df_combined,
+            "df_combined": self.df_combined,
         }
     

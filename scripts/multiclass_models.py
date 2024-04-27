@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from processing import process
 from utils import display
 # from IPython.display import display
 from PIL import Image
@@ -15,6 +16,8 @@ from torchvision.transforms import Compose, Resize, ToTensor
 import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
+
+import json
 
 from collections import OrderedDict
 
@@ -62,61 +65,59 @@ class image_n_label:
 class resnet18:
     def __init__(
         self,
-        df: pd.DataFrame,
-        train_set: Union[pd.DataFrame, list, str],
-        val_set: Union[pd.DataFrame, list, str],
-        label_codes: dict,
-        data_dir: Path,
+        source: process,
         model_dir: Path,
-        transform: List[Callable],  # Requires from typing import List, Callable
+        transform: Union[None, transforms.Compose, List[Callable]],       
         batch_size: int = 32,
         epochs: int = 10,
         base_learning_rate: float = 0.001,
-        filename_stem: str = "rn18mc",
+        filename_stem: str = "rn18",
         filename_suffix: str = "",
         overwrite: Union[bool, None] = None,
-        Print: bool = False,
+        code_test: Union[bool, None] = None,        
+        Print: Union[bool,None] = None,
         model=models.resnet18(weights="ResNet18_Weights.DEFAULT"),
         state_dict: Union[
             None, Dict[str, torch.Tensor]
-        ] = None,  # from typing import Dict, Union
-        epoch_losses: dict = None,
+        ] = None,  
+        epoch_losses: Union[dict, None] = None,
     ) -> None:
 
-        self.df = df
-        self.train_set = train_set
-        self.val_set = val_set
-        self.label_codes = label_codes
-        # Set up self._df_train (new attribute)---depends on the type of input:
-        if isinstance(train_set, pd.DataFrame):
-            self._df_train = train_set
-        elif isinstance(train_set, list):
-            self._df_train = self.df[self.df["set"].isin(train_set)]
-        elif isinstance(train_set, str):
-            self._df_train = self.df[self.df["set"] == train_set]
+        self.source = source
+        self.df = self.source.df
+        self.restrict_to = self.source.restrict_to,
+        self.remove_if  = self.source.remove_if,
+        self.drop_row_if_missing_value_in = self.source.drop_row_if_missing_value_in,
+        self.tvr = self.source.tvr,
+        self.seed = self.source.seed,
+        self.keep_first = self.source.keep_first,
+        self.stratified = self.source.stratified, 
+                
+        self.code_test = code_test
+        if self.code_test is None:
+            self.code_test = False
+        if self.code_test:
+            self.df_combined = self.source._df_sample_batch
         else:
-            raise ValueError(
-                "train_set must be either a DataFrame, a list (e.g. ['t1','ta'], or a string (e.g. 't1'\)."
-            )
+            self.df_combined = self.source.df_combined
+        self._df_train = self.df_combined[self.df_combined['set'].isin(["t1","ta"])]
+        self._df_val = self.df_combined[self.df_combined['set'].isin(["v1","va"])] 
+        self.train_one_img_per_lesion = self.source.train_one_img_per_lesion
+        self.val_one_img_per_lesion = self.source.val_one_img_per_lesion
+        self.val_expansion_factor = self.source.val_expansion_factor
+        self.to_classify = self.source.to_classify
+        self.sample_size = self.source.sample_size
+        self.label_codes = self.source._label_codes
+        self.label_dict = self.source._label_dict
+        self.num_labels = self.source._num_labels        
 
-        # Now the same for self._df_val (new attribute):
-        if isinstance(val_set, pd.DataFrame):
-            self._df_val = val_set
-        elif isinstance(val_set, list):
-            self._df_val = self.df[self.df["set"].isin(val_set)]
-        elif isinstance(val_set, str):
-            self._df_val = self.df[self.df["set"] == val_set]
-        else:
-            raise ValueError(
-                "val_set must be either a DataFrame, a list (e.g. ['v1','va'], or a string (e.g. 'v1'\)."
-            )
-
-        # Continuing...
-        self.data_dir = data_dir
+        self.data_dir = self.source.data_dir
         self.model_dir = model_dir
         self.transform = transform
         self.batch_size = batch_size
         self.epochs = epochs
+        if self.code_test:
+            self.epochs = 1
         self.base_learning_rate = base_learning_rate
         self.filename_stem = filename_stem
         self.filename_suffix = filename_suffix
@@ -124,24 +125,48 @@ class resnet18:
         if self.overwrite is None:
             self.overwrite = False
         self.Print = Print
+        if self.Print is None:
+            self.Print = False
+        if self.code_test:
+            self.Print = True
         self.model = model
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses
 
-        self.construct_filename()
+        self.construct_filename()        
+        self.save_attributes_to_file()
 
     def construct_filename(self) -> None:
         # To construct a string for the filename (for saving)
+        tvcode = ""
         try:
             if "ta" in self._df_train["set"].unique():
-                tcode = "ta"
+                tvcode += "ta"
             else:
-                tcode = "t1"
+                tvcode += "t1"
         except:
-            tcode = ""
+            pass
+        try:
+            if "va" in self._df_val["set"].unique():
+                tvcode += "va"
+            else:
+                tvcode += "v1"
+        except:
+            pass
+        balance_code = ""
+        try:
+            if self.sample_size is not None:
+                balance_code += "bal"
+            else:
+                pass
+        except:
+            pass
+        testcode = ""
+        if self.code_test:
+            testcode += "test"        
 
         # Initial filename without suffix
-        base_filename = "_".join([self.filename_stem, tcode, str(self.epochs) + "e"])
+        base_filename = "_".join([self.filename_stem, tvcode, balance_code, testcode, str(self.epochs) + "e",])
 
         # Find a unique filename by incrementing a counter
         counter = 0
@@ -156,10 +181,12 @@ class resnet18:
                 counter += 1  # Increment counter for next attempt
 
         # New attribute
-        if self.overwrite:
+        if self.overwrite:            
             self._filename = base_filename + f"_{self.filename_suffix}_{counter:02d}" 
+            print(f"Existing files will be overwritten. \nBase filename: {self._filename}")
         else:
             self._filename = filename
+            print(f"New files will be created. \nBase filename: {self._filename}")
 
     def train(self) -> None:
         # Define DataLoader for batch processing
@@ -260,8 +287,18 @@ class resnet18:
 
         print("model.state_dict() can now be accessed through state_dict attribute.")
         print("Train/val losses can now be accessed through epoch_losses attribute.")
-        self.epoch_losses = loss_dict
+        self.epoch_losses = loss_dict.copy()        
         self.state_dict = model.state_dict()
+        
+        # Save the epoch losses to a text file for later
+        file_path = self.model_dir.joinpath(self._filename + "_epoch_losses" + ".json")
+        for key, value in loss_dict.items():
+            if isinstance(value, np.ndarray):
+                loss_dict[key] = value.tolist()
+        print(f"Epoch losses dictionary save as {file_path}")
+        # Save the dictionary to a JSON file
+        with open(file_path, 'w') as json_file:
+            json.dump(loss_dict, json_file)
 
     def inference(
         self,
@@ -349,16 +386,16 @@ class resnet18:
         if save:
             try:
                 print(
-                    "Assigning inference dataframe to new attribute self._inference_df."
+                    "Assigning inference dataframe to new attribute self._df_inference."
                 )
                 # New attribute
-                self._inference_df = inference_df
+                self._df_inference = inference_df
                 try:
                     print(f"Saving dataframe as {file_path_csv}")
                     inference_df.to_csv(file_path_csv, index=False)
                 except Exception as e:
                     print(
-                        f"Error assigning inference dataframe to new attribute self._inference_df: {e}"
+                        f"Error assigning inference dataframe to new attribute self._df_inference: {e}"
                     )
             except Exception as e:
                 print(f"Error saving dataframe to csv file: {e}")
@@ -391,13 +428,78 @@ class resnet18:
 
         return output
 
-    def get_hidden_attributes(self) -> Dict[str, Union[str, pd.DataFrame]]:
+    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, None]]:
         return {
-            "_df_train": self._df_train,
-            "_df_val": self._df_val,
+            "source": self.source,
+            "model_dir": self.model_dir,
+            "data_dir": self.data_dir,
+            "filename_stem": self.filename_stem,
+            "filename_suffix": self.filename_suffix,
             "_filename": self._filename,
-            "_inference_df": self._inference_df,
+            "overwrite": self.overwrite,
+            "restrict_to": self.restrict_to,
+            "remove_if": self.remove_if,
+            "drop_row_if_missing_value_in": self.drop_row_if_missing_value_in,
+            "tvr": self.tvr,
+            "seed": self.seed,
+            "keep_first": self.keep_first,
+            "stratified": self.stratified,                  
+            "val_one_img_per_lesion": self.val_one_img_per_lesion,
+            "val_expansion_factor": self.val_expansion_factor,
+            "to_classify": self.to_classify,
+            "sample_size": self.sample_size,
+            "label_codes": self.label_codes,
+            "label_dict": self.label_dict,
+            "num_labels": self.num_labels,             
+            "df": self.df,
+            "df_combined": self.df_combined,
+            "_df_train": self._df_train,
+            "_df_val": self._df_val,            
+            "_df_inference": self._df_inference,            
+            "transform": self.transform,
+            "batch_size": self.batch_size,
+            "base_learning_rate": self.base_learning_rate,
+            
+            "code_test": self.code_test,       
         }
+    
+    def save_attributes_to_file(self):
+        # Filter and convert values to strings
+        attributes_dict = {
+            "data_dir": self.data_dir,            
+            "model_dir": self.model_dir,
+            "filename_stem": self.filename_stem,
+            "filename_suffix": self.filename_suffix,
+            "_filename": self._filename,         
+            "overwrite": self.overwrite,            
+            "restrict_to": self.restrict_to,
+            "remove_if": self.remove_if,
+            "drop_row_if_missing_value_in": self.drop_row_if_missing_value_in,
+            "tvr": self.tvr,
+            "seed": self.seed,
+            "keep_first": self.keep_first,
+            "stratified": self.stratified,            
+            "val_one_img_per_lesion": self.val_one_img_per_lesion,
+            "val_expansion_factor": self.val_expansion_factor,
+            "to_classify": self.to_classify,
+            "sample_size": self.sample_size,
+            "label_codes": self.label_codes,
+            "label_dict": self.label_dict,
+            "num_labels": self.num_labels,             
+            "transform": self.transform,
+            "batch_size": self.batch_size,
+            "base_learning_rate": self.base_learning_rate,
+            "code_test": self.code_test,       
+        }
+        filtered_dict = {}
+        for key, value in attributes_dict.items():
+            if isinstance(value, (str, int, float, bool, list, Path, transforms.Compose, dict)):
+                filtered_dict[key] = str(value)
+        filepath = self.model_dir.joinpath(self._filename + "_attributes.json")
+        # Save the filtered dictionary to a JSON file
+        print(f"Attributes saved to file: {filepath}")
+        with open(filepath, 'w') as json_file:
+            json.dump(filtered_dict, json_file)
 
 
 '''
@@ -492,14 +594,14 @@ def df_with_probabilities(model_or_path: Union[resnet18, Path],) -> pd.DataFrame
     if isinstance(model_or_path, resnet18):
         instance = model_or_path
         try:
-            if isinstance(instance._inference_df, pd.DataFrame):
-                return instance._inference_df
+            if isinstance(instance._df_inference, pd.DataFrame):
+                return instance._df_inference
             else:
                 try:
                     filename_csv = instance._filename + "_infer.csv"
                     file_path_csv = instance.model_dir.joinpath(filename_csv)
-                    instance._inference_df = pd.read_csv(file_path_csv)
-                    return instance._inference_df
+                    instance._df_inference = pd.read_csv(file_path_csv)
+                    return instance._df_inference
                 except Exception as e:
                     print(f"Error reading csv file {file_path_csv}: {e}")            
                     return
@@ -508,8 +610,8 @@ def df_with_probabilities(model_or_path: Union[resnet18, Path],) -> pd.DataFrame
             try:
                 filename_csv = instance._filename + "_infer.csv"
                 file_path_csv = instance.model_dir.joinpath(filename_csv)
-                instance._inference_df = pd.read_csv(file_path_csv)
-                return instance._inference_df
+                instance._df_inference = pd.read_csv(file_path_csv)
+                return instance._df_inference
             except Exception as e:
                 print(f"Error reading csv file {file_path_csv}: {e}")            
                 return
