@@ -62,7 +62,7 @@ class image_n_label:
         return image, label, image_id
 
 
-class resnet18:
+class cnn:
     def __init__(
         self,
         source: Union[process, pd.DataFrame],        
@@ -81,7 +81,7 @@ class resnet18:
         overwrite: Union[bool, None] = None,
         code_test: Union[bool, None] = None,        
         Print: Union[bool,None] = None,
-        model: Union[None, models.ResNet] = None, 
+        model: Union[None, models.ResNet, models.EfficientNet] = None, 
         state_dict: Union[None, Dict[str, torch.Tensor]] = None,  
         epoch_losses: Union[dict, None] = None,
     ) -> None:
@@ -150,7 +150,8 @@ class resnet18:
         if self.Print is None:
             self.Print = False
         if self.model is None:
-            self.model = models.resnet18(weights="ResNet18_Weights.DEFAULT")            
+            self.model = models.resnet18(weights="ResNet18_Weights.DEFAULT")  
+#             self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
             
         if isinstance(self.source, process):
             # New attributes
@@ -253,15 +254,19 @@ class resnet18:
         )
         dataloader = DataLoader(training_data, batch_size=self.batch_size, shuffle=True)
 
-        # Load the ResNet18 model
+        # Load the ResNet18/EfficientNet model
         model = self.model
         # Unfreeze all layers for fine-tuning
         for param in model.parameters():
             param.requires_grad = True  # All layers unfrozen for fine-tuning right away
 
         # Replace the last layer for classification with appropriate number of labels
-        num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, len(self.label_codes))
+        if isinstance(model,models.ResNet):
+            num_ftrs = model.fc.in_features
+            model.fc = nn.Linear(num_ftrs, len(self.label_codes))
+        elif isinstance(model,models.EfficientNet):
+            num_ftrs = model.classifier[1].in_features
+            model.classifier[1] = nn.Linear(num_ftrs, len(self.label_codes))
 
         # Define loss function and optimizer
         criterion = nn.CrossEntropyLoss()

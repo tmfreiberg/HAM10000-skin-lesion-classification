@@ -65,6 +65,7 @@ class process:
         self.insert_label_column()
         # Insert 'set' column indicating train/val assignment
         self.train_val_split()
+        
         # Balance classes (if applicable)
         if self.sample_size is not None:
             # New attribute
@@ -80,6 +81,7 @@ class process:
             else:
                 self.df_train = self._df_train_a
                 print("- Training set (not balanced, all images per lesion): self.df_train")
+        
         # Expand validation set (if applicable)
         if self.val_expansion_factor is not None:
             print(f'- Expanding validation set: will combine {self.val_expansion_factor} predictions into one, for each lesion in val set.')
@@ -94,8 +96,7 @@ class process:
             print("- Validation set (not expanded, one image per lesion): self.df_val1")
             self.df_val_a = self._df_val_a
             print("- Validation set (not expanded, use more than one image per lesion): self.df_val_a")
-        # Combine training and validation dataframes
-#         self.combine()
+
         # Create a small sample batch dataframe for code testing
         self.sample_batch()
 
@@ -600,51 +601,7 @@ class process:
         # Re-order the columns
         new_column_order = list(expanded_val_df.columns)[:4] + ['img_mult'] + list(expanded_val_df.columns)[4:-1]
 
-        return expanded_val_df[new_column_order]    
-                
-#     def combine(self) -> None:
-#         print("Combining training dataframe and validation dataframe into a single dataframe.")
-#         if self.sample_size is not None:
-#             # New attribute
-#             self.df_combined = self.df_train
-#         else:
-#             if self.train_one_img_per_lesion:
-#                 self.df_combined = self._df_train1
-#             else:
-#                 self.df_combined = self._df_train_a
-#         if self.val_expansion_factor is not None:
-#             self.df_combined = pd.concat([self.df_combined, self._df_expanded_val], ignore_index=True)
-#         else:
-#             if self.val_one_img_per_lesion:                
-#                 self.df_combined = pd.concat([self.df_combined, self._df_val1], ignore_index=True)
-#             else:
-#                 self.df_combined = pd.concat([self.df_combined, self._df_val_a], ignore_index=True)
-
-#         if 'lesion_mult' in self.df_combined.columns and self.df_combined['lesion_mult'].isna().any():
-#             lesion_id_multiplicity = self.df_combined['lesion_id'].value_counts()
-#             self.df_combined['lesion_mult'] = self.df_combined['lesion_id'].map(lesion_id_multiplicity)
-
-
-#         if 'img_mult' in self.df_combined.columns and self.df_combined['img_mult'].isna().any():
-#             image_id_multiplicity = self.df_combined['image_id'].value_counts()
-#             self.df_combined['img_mult'] = self.df_combined['image_id'].map(image_id_multiplicity)
-
-#             new_column_order = ['lesion_id', 
-#                                 'lesion_mult',
-#                                 'num_images', 
-#                                 'image_id', 
-#                                 'img_mult',
-#                                 'dx',                                  
-#                                 'label',
-#                                 'dx_type',
-#                                 'age', 
-#                                 'sex', 
-#                                 'localization', 
-#                                 'set', 
-#                                 ]
-#             self.df_combined = self.df_combined[new_column_order] 
-            
-#         print("See self.df_combined.")     
+        return expanded_val_df[new_column_order]                       
         
     def sample_batch(self):
         print("- Small sample dataframes for code testing:", end=' ')
@@ -668,7 +625,7 @@ class process:
             sampled_df = self.df_val_a[self.df_val_a['lesion_id'].isin(sampled_lesion_ids)]
             self._df_val_a_code_test = pd.concat([self._df_val_a_code_test, sampled_df], ignore_index=True)  
         
-        print("self._df_train_code_test, self._df_val1_code_test, self._df_val_a_code_test.")     
+        print("self._df_train_code_test, self._df_val1_code_test, self._df_val_a_code_test")     
                     
     def get_hidden_attributes(self) -> Dict[str, Union[Path, str, dict, int, pd.DataFrame]]:
         return {
@@ -678,13 +635,11 @@ class process:
             "_num_labels": self._num_labels,
             "_df_train1": self._df_train1,
             "_df_train_a": self._df_train_a,
-#             "df_train": self.df_train,
-#             "_df_val1": self._df_val1,
-#             "_df_val_a": self._df_val_a,                        
+            "df_train": self.df_train,                      
             "df_val1": self.df_val1,
             "df_val_a": self.df_val_a,
-#             "_df_sample_batch": self._df_sample_batch,
-#             "_df_expanded_val": self._df_expanded_val,
-#             "df_combined": self.df_combined,
+            "_df_train_code_test": self._df_train_code_test,
+            "_df_val1_code_test": self._df_val1_code_test,
+            "_df_val_a_code_test": self._df_val_a_code_test,
         }
     
