@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from processing import process
-from utils import display
+from utils import display, print_header
 # from IPython.display import display
 from PIL import Image
 
@@ -65,97 +65,155 @@ class image_n_label:
 class resnet18:
     def __init__(
         self,
-        source: process,
+        source: Union[process, pd.DataFrame],        
         model_dir: Path,
-        transform: Union[None, transforms.Compose, List[Callable]],       
-        batch_size: int = 32,
-        epochs: int = 10,
-        base_learning_rate: float = 0.001,
-        filename_stem: str = "rn18",
-        filename_suffix: str = "",
+        transform: Union[None, transforms.Compose, List[Callable]],   
+        train_set: Union[None, pd.DataFrame] = None,
+        label_codes: Union[None, dict] = None,
+        data_dir: Union[None, Path] = None,
+        val1_set: Union[None, pd.DataFrame] = None,
+        val_a_set: Union[None, pd.DataFrame] = None,
+        batch_size: Union[None, int] = None,
+        epochs: Union[None, int] = None,
+        base_learning_rate: Union[None, float] = None,
+        filename_stem: Union[None, str] = None,
+        filename_suffix: Union[None, str] = None,
         overwrite: Union[bool, None] = None,
         code_test: Union[bool, None] = None,        
         Print: Union[bool,None] = None,
-        model=models.resnet18(weights="ResNet18_Weights.DEFAULT"),
-        state_dict: Union[
-            None, Dict[str, torch.Tensor]
-        ] = None,  
+        model: Union[None, models.ResNet] = None, 
+        state_dict: Union[None, Dict[str, torch.Tensor]] = None,  
         epoch_losses: Union[dict, None] = None,
     ) -> None:
 
         self.source = source
-        self.df = self.source.df
-        self.restrict_to = self.source.restrict_to,
-        self.remove_if  = self.source.remove_if,
-        self.drop_row_if_missing_value_in = self.source.drop_row_if_missing_value_in,
-        self.tvr = self.source.tvr,
-        self.seed = self.source.seed,
-        self.keep_first = self.source.keep_first,
-        self.stratified = self.source.stratified, 
-                
-        self.code_test = code_test
-        if self.code_test is None:
-            self.code_test = False
-        if self.code_test:
-            self.df_combined = self.source._df_sample_batch
-        else:
-            self.df_combined = self.source.df_combined
-        self._df_train = self.df_combined[self.df_combined['set'].isin(["t1","ta"])]
-        self._df_val = self.df_combined[self.df_combined['set'].isin(["v1","va"])] 
-        self.train_one_img_per_lesion = self.source.train_one_img_per_lesion
-        self.val_one_img_per_lesion = self.source.val_one_img_per_lesion
-        self.val_expansion_factor = self.source.val_expansion_factor
-        self.to_classify = self.source.to_classify
-        self.sample_size = self.source.sample_size
-        self.label_codes = self.source._label_codes
-        self.label_dict = self.source._label_dict
-        self.num_labels = self.source._num_labels        
-
-        self.data_dir = self.source.data_dir
+#         From source (if an instance of process class):
+#         source.data_dir
+#         source.csv_filename
+#         source.restrict_to
+#         source.remove_if
+#         source.drop_row_if_missing_value_in
+#         source.tvr
+#         source.seed
+#         source.keep_first
+#         source.stratified
+#         source.to_classify
+#         source.train_one_img_per_lesion
+#         source.val_expansion_factor
+#         source.sample_size
+#         source.label_dict
+#         source.label_codes
+#         source.df
+#         source._df_train1
+#         source._df_train_a
+#         source._df_val1
+#         source._df_val_a
+#         source.df_train
+#         source.df_val1
+#         source.df_val_a
+#         source._df_train_code_test
+#         source._df_val1_code_test 
+#         source._df_val_a_code_test                
         self.model_dir = model_dir
         self.transform = transform
+        self.train_set = train_set
+        self.label_codes = label_codes
+        self.data_dir = data_dir
+        self.val1_set = val1_set
+        self.val_a_set = val_a_set
         self.batch_size = batch_size
         self.epochs = epochs
-        if self.code_test:
-            self.epochs = 1
         self.base_learning_rate = base_learning_rate
         self.filename_stem = filename_stem
         self.filename_suffix = filename_suffix
         self.overwrite = overwrite
-        if self.overwrite is None:
-            self.overwrite = False
+        self.code_test = code_test
         self.Print = Print
-        if self.Print is None:
-            self.Print = False
-        if self.code_test:
-            self.Print = True
         self.model = model
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses
+        
+        if self.batch_size is None:
+            self.batch_size = 32
+        if self.epochs is None:
+            self.epochs = 32
+        if self.base_learning_rate is None:
+            self.base_learning_rate = 1/1000
+        if self.filename_stem is None:
+            self.filename_stem = "rn18"
+        if self.filename_suffix is None:
+            self.filename_suffix = ""
+        if self.overwrite is None:
+            self.overwrite = False
+        if self.code_test is None:
+            self.code_test = False
+        if self.Print is None:
+            self.Print = False
+        if self.model is None:
+            self.model = models.resnet18(weights="ResNet18_Weights.DEFAULT")            
+            
+        if isinstance(self.source, process):
+            # New attributes
+            self.df = self.source.df
+            self.df_train = self.source.df_train
+            self.label_codes = self.source.label_codes
+            self.data_dir = self.source.data_dir
+            self.df_val1 = self.source.df_val1
+            self.df_val_a = self.source.df_val_a
+        elif isinstance(self.source, pd.DataFrame):
+            self.df = self.source
+            if self.train_set is not None:
+                if isinstance(self.train_set, pd.DataFrame):
+                    self.df_train = self.train_set
+                elif isinstance(self.train_set, str):
+                    self.df_train = self.df[self.df['set'] == self.train_set]
+                elif isinstance(self.train_set, list):
+                    self.df_train = self.df[self.df['set'].isin(self.train_set)]                
+            if self.val1_set is not None:
+                if isinstance(self.val1_set, pd.DataFrame):
+                    self.df_val1 = self.val1_set
+                elif isinstance(self.val1_set, str):
+                    self.df_val1 = self.df[self.df['set'] == self.val1]
+                elif isinstance(self.val1_set, list):
+                    self.df_val1 = self.df[self.df['set'].isin(self.val1_set)]
+            if self.val_a_set is not None:
+                if isinstance(self.val_a_set, pd.DataFrame):
+                    self.df_val_a = self.val_a_set
+                elif isinstance(self.val_a_set, str):
+                    self.df_val_a = self.df[self.df['set'] == self.val_a_set]
+                elif isinstance(self.val_a_set, list):
+                    self.df_val_a = self.df[self.df['set'].isin(self.val_a_set)] 
+                    
+        if self.code_test:
+            if isinstance(self.source, process):
+                print_header("Code test mode")
+                self.epochs = 1
+                self.Print = True
+                self.filename_suffix = "test"
+                self.overwrite = True         
+                self.df_train = self.source._df_train_code_test
+                self.df_val1 = self.source._df_val1_code_test
+                self.df_val_a = self.source._df_val_a_code_test
+            else:
+                self.code_test = False
+                print("Error: can only turn on code test mode if self.source is an instance of the process class.")       
 
         self.construct_filename()        
         self.save_attributes_to_file()
 
     def construct_filename(self) -> None:
         # To construct a string for the filename (for saving)
-        tvcode = ""
+        tcode = ""
         try:
-            if "ta" in self._df_train["set"].unique():
-                tvcode += "ta"
+            if "ta" in self.df_train["set"].unique():
+                tcode += "ta"
             else:
-                tvcode += "t1"
-        except:
-            pass
-        try:
-            if "va" in self._df_val["set"].unique():
-                tvcode += "va"
-            else:
-                tvcode += "v1"
+                tcode += "t1"
         except:
             pass
         balance_code = ""
         try:
-            if self.sample_size is not None:
+            if isinstance(self.source, process) and self.source.sample_size is not None:
                 balance_code += "bal"
             else:
                 pass
@@ -166,7 +224,7 @@ class resnet18:
             testcode += "test"        
 
         # Initial filename without suffix
-        base_filename = "_".join([self.filename_stem, tvcode, balance_code, testcode, str(self.epochs) + "e",])
+        base_filename = "_".join([self.filename_stem, tcode, balance_code, testcode, str(self.epochs) + "e",])
 
         # Find a unique filename by incrementing a counter
         counter = 0
@@ -191,7 +249,7 @@ class resnet18:
     def train(self) -> None:
         # Define DataLoader for batch processing
         training_data = image_n_label(
-            self._df_train, self.label_codes, self.data_dir, self.transform, self.Print
+            self.df_train, self.label_codes, self.data_dir, self.transform, self.Print
         )
         dataloader = DataLoader(training_data, batch_size=self.batch_size, shuffle=True)
 
@@ -217,7 +275,8 @@ class resnet18:
         # Create a dictionary to record loss
         loss_dict = {
             "train_loss": (-1) * np.ones(self.epochs),
-            "val_loss": (-1) * np.ones(self.epochs),
+            "val1_loss": (-1) * np.ones(self.epochs),
+            "val_a_loss": (-1) * np.ones(self.epochs),
         }
 
         for epoch in range(num_epochs):
@@ -242,25 +301,25 @@ class resnet18:
 
             # Validation step
             # Define DataLoader for batch processing for validation set
-            validation_data = image_n_label(
-                self._df_val,
+            validation_data1 = image_n_label(
+                self.df_val1, # one image per lesion
                 self.label_codes,
                 self.data_dir,
                 self.transform,
                 self.Print,
             )
-            val_dataloader = DataLoader(
-                validation_data, batch_size=self.batch_size, shuffle=False
+            val_dataloader1 = DataLoader(
+                validation_data1, batch_size=self.batch_size, shuffle=False
             )  # No need to shuffle for validation
 
             # Set model to evaluation mode
             if self.Print:
-                print("Validating...")
+                print("Validating (one image per lesion)...")
             model.eval()
             val_running_loss = 0.0
             val_epoch_loss = -1
             with torch.no_grad():  # Disable gradient calculation during validation
-                for val_images, val_labels, _ in val_dataloader:
+                for val_images, val_labels, _ in val_dataloader1:
                     val_images, val_labels = val_images.to(device), val_labels.to(
                         device
                     )
@@ -268,16 +327,49 @@ class resnet18:
                     val_loss = criterion(val_outputs, val_labels)
                     if self.Print:
                         print(f"outputs.shape: {outputs.shape}")
-                        print(f"val_loss: {val_loss}")
+                        print(f"val1_loss: {val_loss}")
                     val_running_loss += val_loss.item()
 
                     # Calculate validation loss for the epoch
-                    val_epoch_loss = val_running_loss / len(val_dataloader)
+                    val1_epoch_loss = val_running_loss / len(val_dataloader1)
                     # Add it to the dictionary
-                    loss_dict["val_loss"][epoch] = val_epoch_loss
+                    loss_dict["val1_loss"][epoch] = val1_epoch_loss
+                    
+            validation_data_a = image_n_label(
+                self.df_val_a, # all images per lesion
+                self.label_codes,
+                self.data_dir,
+                self.transform,
+                self.Print,
+            )
+            val_dataloader_a = DataLoader(
+                validation_data_a, batch_size=self.batch_size, shuffle=False
+            )  # No need to shuffle for validation
+
+            # Model already in evaluation mode (see val1 above)
+            if self.Print:
+                print("Validating (all images per lesion)...")
+            val_running_loss = 0.0
+            val_a_epoch_loss = -1
+            with torch.no_grad():  # Disable gradient calculation during validation
+                for val_images, val_labels, _ in val_dataloader_a:
+                    val_images, val_labels = val_images.to(device), val_labels.to(
+                        device
+                    )
+                    val_outputs = model(val_images)
+                    val_loss = criterion(val_outputs, val_labels)
+                    if self.Print:
+                        print(f"outputs.shape: {outputs.shape}")
+                        print(f"val_a_loss: {val_loss}")
+                    val_running_loss += val_loss.item()
+
+                    # Calculate validation loss for the epoch
+                    val_a_epoch_loss = val_running_loss / len(val_dataloader_a)
+                    # Add it to the dictionary
+                    loss_dict["val_a_loss"][epoch] = val_a_epoch_loss                    
 
             print(
-                f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss: {val_epoch_loss:.4f}"
+                f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss 1: {val_epoch_loss:.4f}, Validation Loss a: {val_a_epoch_loss:.4f}"
             )
 
         # Now save the model
@@ -300,7 +392,7 @@ class resnet18:
         with open(file_path, 'w') as json_file:
             json.dump(loss_dict, json_file)
 
-    def inference(
+    def inference(# !!!THIS NEEDS SOME WORK...
         self,
         df_infer: pd.DataFrame = None,
         filename: str = None,
@@ -428,69 +520,69 @@ class resnet18:
 
         return output
 
-    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, None]]:
-        return {
-            "source": self.source,
-            "model_dir": self.model_dir,
-            "data_dir": self.data_dir,
-            "filename_stem": self.filename_stem,
-            "filename_suffix": self.filename_suffix,
-            "_filename": self._filename,
-            "overwrite": self.overwrite,
-            "restrict_to": self.restrict_to,
-            "remove_if": self.remove_if,
-            "drop_row_if_missing_value_in": self.drop_row_if_missing_value_in,
-            "tvr": self.tvr,
-            "seed": self.seed,
-            "keep_first": self.keep_first,
-            "stratified": self.stratified,                  
-            "val_one_img_per_lesion": self.val_one_img_per_lesion,
-            "val_expansion_factor": self.val_expansion_factor,
-            "to_classify": self.to_classify,
-            "sample_size": self.sample_size,
-            "label_codes": self.label_codes,
-            "label_dict": self.label_dict,
-            "num_labels": self.num_labels,             
-            "df": self.df,
-            "df_combined": self.df_combined,
-            "_df_train": self._df_train,
-            "_df_val": self._df_val,            
-            "_df_inference": self._df_inference,            
-            "transform": self.transform,
-            "batch_size": self.batch_size,
-            "base_learning_rate": self.base_learning_rate,
-            
-            "code_test": self.code_test,       
-        }
+    def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, models.ResNet, None]]:
+        attributes_dict = {
+        "self.df": self.df,
+        "self.df_train": self.df_train,
+        "self.label_codes": self.label_codes,            
+        "self.df_val1": self.df_val1,
+        "self.df_val_a": self.df_val_a, 
+        "self.data_dir": self.data_dir,                
+        "self.model_dir": self.model_dir,
+        "self.transform": self.transform,
+        "self.train_set": self.train_set,
+        "self.label_codes": self.label_codes,
+        "self.data_dir": self.data_dir,
+        "self.val1_set": self.val1_set,
+        "self.val_a_set": self.val_a_set,
+        "self.batch_size": self.batch_size,
+        "self.base_learning_rate": self.base_learning_rate,
+        "self.filename_stem": self.filename_stem,
+        "self.filename_suffix": self.filename_suffix,
+        "self.overwrite": self.overwrite,
+        "self.code_test": self.code_test,
+        "self.Print": self.Print,
+        "self.model": self.model,
+        "self.state_dict": self.state_dict,
+        "self.epoch_losses": self.epoch_losses,
+        "self._filename": self._filename,
+        }        
+        if isinstance(self.source, process):
+            source_dict = {
+            "self.source.data_dir": self.source.data_dir,
+            "self.source.csv_filename": self.source.csv_filename,
+            "self.source.restrict_to": self.source.restrict_to,
+            "self.source.remove_if": self.source.remove_if,
+            "self.source.drop_row_if_missing_value_in": self.source.drop_row_if_missing_value_in,
+            "self.source.tvr": self.source.tvr,
+            "self.source.seed": self.source.seed,
+            "self.source.keep_first": self.source.keep_first,
+            "self.source.stratified": self.source.stratified,
+            "self.source.to_classify": self.source.to_classify,
+            "self.source.train_one_img_per_lesion": self.source.train_one_img_per_lesion,
+            "self.source.val_expansion_factor": self.source.val_expansion_factor,
+            "self.source.sample_size": self.source.sample_size,
+            "self.source.label_dict": self.source.label_dict,
+            "self.source.label_codes": self.source.label_codes,
+            "self.source.df": self.source.df,
+            "self.source._df_train1": self.source._df_train1,
+            "self.source._df_train_a": self.source._df_train_a,
+            "self.source._df_val1": self.source._df_val1,
+            "self.source._df_val_a": self.source._df_val_a,
+            "self.source.df_train": self.source.df_train,
+            "self.source.df_val1": self.source.df_val1,
+            "self.source.df_val_a": self.source.df_val_a,
+            "self.source._df_train_code_test": self.source._df_train_code_test,
+            "self.source._df_val1_code_test": self.source._df_val1_code_test, 
+            "self.source._df_val_a_code_test": self.source._df_val_a_code_test,  
+            }                        
+            attributes_dict.update(source_dict)
+
+        return attributes_dict
     
     def save_attributes_to_file(self):
         # Filter and convert values to strings
-        attributes_dict = {
-            "data_dir": self.data_dir,            
-            "model_dir": self.model_dir,
-            "filename_stem": self.filename_stem,
-            "filename_suffix": self.filename_suffix,
-            "_filename": self._filename,         
-            "overwrite": self.overwrite,            
-            "restrict_to": self.restrict_to,
-            "remove_if": self.remove_if,
-            "drop_row_if_missing_value_in": self.drop_row_if_missing_value_in,
-            "tvr": self.tvr,
-            "seed": self.seed,
-            "keep_first": self.keep_first,
-            "stratified": self.stratified,            
-            "val_one_img_per_lesion": self.val_one_img_per_lesion,
-            "val_expansion_factor": self.val_expansion_factor,
-            "to_classify": self.to_classify,
-            "sample_size": self.sample_size,
-            "label_codes": self.label_codes,
-            "label_dict": self.label_dict,
-            "num_labels": self.num_labels,             
-            "transform": self.transform,
-            "batch_size": self.batch_size,
-            "base_learning_rate": self.base_learning_rate,
-            "code_test": self.code_test,       
-        }
+        attributes_dict = self.get_hidden_attributes()
         filtered_dict = {}
         for key, value in attributes_dict.items():
             if isinstance(value, (str, int, float, bool, list, Path, transforms.Compose, dict)):

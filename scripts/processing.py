@@ -21,7 +21,6 @@ class process:
         stratified: bool = True,
         to_classify: Union[list,dict] = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"],
         train_one_img_per_lesion: Union[bool, None] = None,
-        val_one_img_per_lesion: Union[bool, None] = None, 
         val_expansion_factor: Union[int, None] = None,
         sample_size: Union[None, dict] = None,
     ) -> None:
@@ -44,10 +43,6 @@ class process:
         self.train_one_img_per_lesion = train_one_img_per_lesion
         if self.train_one_img_per_lesion is None:
             self.train_one_img_per_lesion = False
-        
-        self.val_one_img_per_lesion = val_one_img_per_lesion
-        if self.val_one_img_per_lesion is None:
-            self.val_one_img_per_lesion = True
         
         self.val_expansion_factor = val_expansion_factor
         self.sample_size = sample_size
@@ -72,12 +67,35 @@ class process:
         self.train_val_split()
         # Balance classes (if applicable)
         if self.sample_size is not None:
-            self.balance()
+            # New attribute
+            self.df_train = self.balance()
+            if self.train_one_img_per_lesion:
+                print("- Balanced training set (one image per lesion): self.df_train")
+            else:
+                print("- Balanced training set (all images per lesion): self.df_train")
+        else:
+            if self.train_one_img_per_lesion:
+                self.df_train = self._df_train1
+                print("- Training set (not balanced, one image per lesion): self.df_train")
+            else:
+                self.df_train = self._df_train_a
+                print("- Training set (not balanced, all images per lesion): self.df_train")
         # Expand validation set (if applicable)
         if self.val_expansion_factor is not None:
-            self.expand_val()
+            print(f'- Expanding validation set: will combine {self.val_expansion_factor} predictions into one, for each lesion in val set.')
+            # New attribute
+            self.df_val1 = self.expand_val(one_img_per_lesion = True)
+            print("- Expanded validation set (one image per lesion): self.df_val1")
+            self.df_val_a = self.expand_val(one_img_per_lesion = False)
+            print("- Expanded validation set (use more than one image per lesion): self.df_val_a")
+        else:
+            # New attribute
+            self.df_val1 = self._df_val1
+            print("- Validation set (not expanded, one image per lesion): self.df_val1")
+            self.df_val_a = self._df_val_a
+            print("- Validation set (not expanded, use more than one image per lesion): self.df_val_a")
         # Combine training and validation dataframes
-        self.combine()
+#         self.combine()
         # Create a small sample batch dataframe for code testing
         self.sample_batch()
 
@@ -86,7 +104,7 @@ class process:
         # Load metadata.csv into a dataframe.
         try:
             self.df = pd.read_csv(self._csv_file_path)
-            print(f"Successfully loaded file '{self._csv_file_path}'.")
+            print(f"- Successfully loaded file '{self._csv_file_path}'.")
         except Exception as e:
             print(f"Error loading file '{self._csv_file_path}': {e}")
             
@@ -96,7 +114,7 @@ class process:
                 k: v for k, v in self.restrict_to.items() if k in self.df.columns
             }
             if len(self.restrict_to) > 0:
-                print(f"\nRemoving all records unless:")
+                print(f"- Removing all records unless:")
                 for k, v_list in self.restrict_to.items():
                     print(f"  {k} in {v_list}")
                 # Generate the query string based on the self.restrict_to dictionary
@@ -109,7 +127,7 @@ class process:
                 k: v for k, v in self.remove_if.items() if k in self.df.columns
             }
             if len(self.remove_if) > 0:
-                print(f"\nRemoving all records if:")
+                print(f"- Removing all records if:")
                 for k, v_list in self.remove_if.items():
                     print(f"  {k} in {v_list}")
                 # Generate the query string based on the self.remove_if dictionary
@@ -121,7 +139,7 @@ class process:
     def drop_missing(self) -> None:
         # New attribute:
         print(
-            "\nDropping rows for which there is a missing value in a column from self.drop_row_if_missing_value_in."
+            "- Dropping rows for which there is a missing value in a column from self.drop_row_if_missing_value_in."
         )
         self.df = self.df.dropna(subset=self.drop_row_if_missing_value_in).copy()            
 
@@ -134,7 +152,7 @@ class process:
                 self.df["lesion_id"].map(self.df["lesion_id"].value_counts()),
             )
             print(
-                f"Inserted 'num_images' column in dataframe, to the right of 'lesion_id' column."
+                f"- Inserted 'num_images' column in dataframe, to the right of 'lesion_id' column."
             )
         except Exception as e:
             print(f"Error inserting 'num_images' column: {e}")
@@ -151,21 +169,20 @@ class process:
                 self.to_classify = list(care_about)
                 others = all_dxs - care_about
                 if others:
-                    self._label_dict = {dx : 0 for dx in others}
-                    self._label_dict.update({dx: i + 1 for i, dx in enumerate(care_about)})
+                    self.label_dict = {dx : 0 for dx in others}
+                    self.label_dict.update({dx: i + 1 for i, dx in enumerate(care_about)})
                     # New attribute
-                    self._label_codes = {0 : 'other'}
-                    self._label_codes.update({i + 1: dx for i, dx in enumerate(care_about)}) 
+                    self.label_codes = {0 : 'other'}
+                    self.label_codes.update({i + 1: dx for i, dx in enumerate(care_about)}) 
                 else:
                     # New attribute
-                    self._label_dict = {dx: i for i, dx in enumerate(care_about)}
+                    self.label_dict = {dx: i for i, dx in enumerate(care_about)}
                     # New attribute 
-                    self._label_codes = {i: dx for i, dx in enumerate(care_about)}                    
+                    self.label_codes = {i: dx for i, dx in enumerate(care_about)}                    
                 # New attribute
-                self._num_labels = len(self._label_dict)                
-                print("Created self._label_dict (maps labels to indices).")
+                self._num_labels = len(self.label_dict)                
             except Exception as e:
-                print(f"Error creating label_dict: {e}")
+                print(f"Error creating self.label_dict: {e}")
         elif isinstance(self.to_classify, dict):
             all_dxs: set = set(self.df["dx"].unique())
             try:
@@ -177,7 +194,7 @@ class process:
                 # Remove any dx_category, dx_list item from the dictionary if the dx_list is empty
                 self.to_classify = { dx_category : dx_list for dx_category, dx_list in self.to_classify.items() if dx_list }
 
-                self._label_codes = { i + 1 : dx_category for i, dx_category in enumerate(self.to_classify.keys()) }
+                self.label_codes = { i + 1 : dx_category for i, dx_category in enumerate(self.to_classify.keys()) }
 
                 care_about = set()
                 for dx_list in self.to_classify.values():
@@ -185,17 +202,16 @@ class process:
                 others = all_dxs - care_about
                 if others:
                     self.to_classify['other'] = list(others)
-                    self._label_codes[0] = 'other'
+                    self.label_codes[0] = 'other'
                 else:
-                    self._label_codes = { j - 1 : dx_category for j, dx_category in self._label_codes.items() }            
+                    self.label_codes = { j - 1 : dx_category for j, dx_category in self.label_codes.items() }            
 
-                self._label_dict = { }
-                for i, dx_category in self._label_codes.items():
+                self.label_dict = { }
+                for i, dx_category in self.label_codes.items():
                     for dx in self.to_classify[dx_category]:
-                        self._label_dict[dx] = i
+                        self.label_dict[dx] = i
                 # New attribute
-                self._num_labels = len(self._label_dict)                
-                print("Created self._label_dict (maps labels to indices).")
+                self._num_labels = len(self.label_dict)                
             except Exception as e:
                 print(f"Error creating label_dict: {e}")
                 
@@ -203,8 +219,8 @@ class process:
     def insert_label_column(self) -> None:
         # Insert 'label' column to the right of 'dx' column.
         try:
-            self.df.insert(4, "label", self.df["dx"].map(self._label_dict))
-            print(f"Inserted 'label' column in dataframe, to the right of 'dx' column.")
+            self.df.insert(4, "label", self.df["dx"].map(self.label_dict))
+            print(f"- Inserted 'label' column in dataframe, to the right of 'dx' column: \n  {self.label_dict}")
         except Exception as e:
             print(f"Error inserting 'label' column: {e}.")
 
@@ -279,7 +295,7 @@ class process:
                 self.df.loc[self.df["image_id"].isin(va[label]), "set"] = "va"
 
             print(
-                f"Added 'set' column to dataframe, with values 't1', 'v1', 'ta', and 'va', to the right of 'localization' column."
+                f"- Added 'set' column to dataframe, with values 't1', 'v1', 'ta', and 'va', to the right of 'localization' column."
             )
 
         else:
@@ -332,13 +348,13 @@ class process:
             self.df.loc[self.df["image_id"].isin(va), "set"] = "va"
 
             print(
-                "Added 'set' column to dataframe, with values 't1', 'v1', 'ta', and 'va', to the right of 'localization' column."
+                "- Added 'set' column to dataframe, with values 't1', 'v1', 'ta', and 'va', to the right of 'localization' column."
             )
          
-        print("See self.df")
-        # We create new attributes df_train1, df_train_a, df_val1, and df_val_a.
+        print("- Basic, overall dataframe (pre-train/test split): self.df")
+        # We create new attributes _df_train1, _df_train_a, _df_val1, and _df_val_a.
         # They are references to df (all point to the same underlying dataframe object in memory).
-        # Any modifications made to self.df will also affect self.df_train1 etc., and vice-versa.
+        # Any modifications made to self.df will also affect self._df_train1 etc., and vice-versa.
         self._df_train1 = self.df[self.df["set"] == "t1"]
         self._df_train_a = self.df[(self.df["set"] == "t1") | (self.df["set"] == "ta")]
         self._df_val1 = self.df[self.df["set"] == "v1"]
@@ -393,11 +409,11 @@ class process:
         dx_breakdown_dist.index.names = ["dx"]
         
         try:
-            index_mapping = { value : key for key, value in self._label_dict.items() if value != 0 }
-            if len({ key : value for key, value in self._label_dict.items() if value == 0}) > 1:
+            index_mapping = { value : key for key, value in self.label_dict.items() if value != 0 }
+            if len({ key : value for key, value in self.label_dict.items() if value == 0}) > 1:
                 index_mapping.update({ 0 : 'other'})
             else:
-                index_mapping.update({ key : value for key, value in self._label_dict.items() if value == 0})
+                index_mapping.update({ key : value for key, value in self.label_dict.items() if value == 0})
             dx_breakdown_dist.index = dx_breakdown_dist.index.map(index_mapping)
         except:
             pass
@@ -420,8 +436,8 @@ class process:
                     f"Total {across}: {col.shape[0]} ({100*col.shape[0]/tot_images:.2f}% of all {across}).\n"
                 )
                 
-    def balance(self) -> None:
-        print("Balancing classes in training set.")
+    def balance(self) -> pd.DataFrame:
+        print("- Balancing classes in training set.")
         if self.train_one_img_per_lesion:
             df = self._df_train1.copy()
             df['num_images'] = 1
@@ -431,8 +447,8 @@ class process:
         sample_image_list = []
         sample_set = set(self.sample_size.keys())
 
-        if (sample_set.difference({'other'})).issubset(set(self._label_codes.values())) or "other" in sample_set:
-            for i, dx in self._label_codes.items():
+        if (sample_set.difference({'other'})).issubset(set(self.label_codes.values())) or "other" in sample_set:
+            for i, dx in self.label_codes.items():
                 try: # if dx is not a key of self.sample_size, it will simply be skipped
                     N = self.sample_size[dx]
                     class_df = df[df['label'] == i].copy()
@@ -461,9 +477,9 @@ class process:
                     sample_image_list.extend(selected_images)
                 except:
                     pass
-        if sample_set.difference({'other'}).issubset(set(self._label_dict.keys())):
-            for dx, i in self._label_dict.items():
-                if dx in self._label_codes.values():                     
+        if sample_set.difference({'other'}).issubset(set(self.label_dict.keys())):
+            for dx, i in self.label_dict.items():
+                if dx in self.label_codes.values():                     
                     pass # Would have already covered this above
                 else:
                     try: # if dx is not a key of self.sample_size, it will simply be skipped
@@ -516,22 +532,19 @@ class process:
         balanced_df.insert(loc=1, column='lesion_mult', value=balanced_df['lesion_id'].map(lesion_id_multiplicity))
         
         if self.train_one_img_per_lesion:
-            # Merge df_train1['num_images'] into balanced_df based on 'lesion_id'
+            # Merge _df_train1['num_images'] into balanced_df based on 'lesion_id'
             merged_df = pd.merge(balanced_df, self._df_train1[['lesion_id', 'num_images']], on='lesion_id', how='left')
-            # Update 'num_images' column in balanced_df with values from df_train1
+            # Update 'num_images' column in balanced_df with values from _df_train1
             balanced_df['num_images'] = merged_df['num_images_y'].fillna(merged_df['num_images_x'])
         
         # Re-order the columns
         new_column_order = list(balanced_df.columns)[:4] + ['img_mult'] + list(balanced_df.columns)[4:-1]
-        # New attribute
-        self._df_balanced = balanced_df[new_column_order]  
         
-        print("See self._df_balanced.")
-        
-    def expand_val(self):
-        print(f'Expanding validation set: for each lesion in the validation set, {self.val_expansion_factor} predictions will ultimately be combined into a single prediction.')
+        return balanced_df[new_column_order]  
+                
+    def expand_val(self, one_img_per_lesion: bool) -> pd.DataFrame:        
         m = self.val_expansion_factor
-        if self.val_one_img_per_lesion:
+        if one_img_per_lesion:
             df = self._df_val1.copy()
             
             expanded_val_df = df.reindex(df.index.repeat(m)).reset_index(drop=True)
@@ -586,85 +599,92 @@ class process:
         
         # Re-order the columns
         new_column_order = list(expanded_val_df.columns)[:4] + ['img_mult'] + list(expanded_val_df.columns)[4:-1]
-        # New attribute
-        self._df_expanded_val = expanded_val_df[new_column_order]    
-        
-        print("See self._df_expanded_val.")
-        
-    def combine(self) -> None:
-        print("Combining training dataframe and validation dataframe into a single dataframe.")
-        if self.sample_size is not None:
-            # New attribute
-            self.df_combined = self._df_balanced
-        else:
-            if self.train_one_img_per_lesion:
-                self.df_combined = self._df_train1
-            else:
-                self.df_combined = self._df_train_a
-        if self.val_expansion_factor is not None:
-            self.df_combined = pd.concat([self.df_combined, self._df_expanded_val], ignore_index=True)
-        else:
-            if self.val_one_img_per_lesion:                
-                self.df_combined = pd.concat([self.df_combined, self._df_val1], ignore_index=True)
-            else:
-                self.df_combined = pd.concat([self.df_combined, self._df_val_a], ignore_index=True)
 
-        if 'lesion_mult' in self.df_combined.columns and self.df_combined['lesion_mult'].isna().any():
-            lesion_id_multiplicity = self.df_combined['lesion_id'].value_counts()
-            self.df_combined['lesion_mult'] = self.df_combined['lesion_id'].map(lesion_id_multiplicity)
+        return expanded_val_df[new_column_order]    
+                
+#     def combine(self) -> None:
+#         print("Combining training dataframe and validation dataframe into a single dataframe.")
+#         if self.sample_size is not None:
+#             # New attribute
+#             self.df_combined = self.df_train
+#         else:
+#             if self.train_one_img_per_lesion:
+#                 self.df_combined = self._df_train1
+#             else:
+#                 self.df_combined = self._df_train_a
+#         if self.val_expansion_factor is not None:
+#             self.df_combined = pd.concat([self.df_combined, self._df_expanded_val], ignore_index=True)
+#         else:
+#             if self.val_one_img_per_lesion:                
+#                 self.df_combined = pd.concat([self.df_combined, self._df_val1], ignore_index=True)
+#             else:
+#                 self.df_combined = pd.concat([self.df_combined, self._df_val_a], ignore_index=True)
+
+#         if 'lesion_mult' in self.df_combined.columns and self.df_combined['lesion_mult'].isna().any():
+#             lesion_id_multiplicity = self.df_combined['lesion_id'].value_counts()
+#             self.df_combined['lesion_mult'] = self.df_combined['lesion_id'].map(lesion_id_multiplicity)
 
 
-        if 'img_mult' in self.df_combined.columns and self.df_combined['img_mult'].isna().any():
-            image_id_multiplicity = self.df_combined['image_id'].value_counts()
-            self.df_combined['img_mult'] = self.df_combined['image_id'].map(image_id_multiplicity)
+#         if 'img_mult' in self.df_combined.columns and self.df_combined['img_mult'].isna().any():
+#             image_id_multiplicity = self.df_combined['image_id'].value_counts()
+#             self.df_combined['img_mult'] = self.df_combined['image_id'].map(image_id_multiplicity)
 
-            new_column_order = ['lesion_id', 
-                                'lesion_mult',
-                                'num_images', 
-                                'image_id', 
-                                'img_mult',
-                                'dx',                                  
-                                'label',
-                                'dx_type',
-                                'age', 
-                                'sex', 
-                                'localization', 
-                                'set', 
-                                ]
-            self.df_combined = self.df_combined[new_column_order] 
+#             new_column_order = ['lesion_id', 
+#                                 'lesion_mult',
+#                                 'num_images', 
+#                                 'image_id', 
+#                                 'img_mult',
+#                                 'dx',                                  
+#                                 'label',
+#                                 'dx_type',
+#                                 'age', 
+#                                 'sex', 
+#                                 'localization', 
+#                                 'set', 
+#                                 ]
+#             self.df_combined = self.df_combined[new_column_order] 
             
-        print("See self.df_combined.")     
+#         print("See self.df_combined.")     
         
     def sample_batch(self):
-        print("Creating a small sample dataframe for code testing.")
+        print("- Small sample dataframes for code testing:", end=' ')
         # New attribute
-        self._df_sample_batch = pd.DataFrame()
-        for dx in self.df_combined['dx'].unique():
-            df = self.df_combined[(self.df_combined['dx'] == dx) & (self.df_combined['set'].isin(["t1","ta"]))]['lesion_id']
+        self._df_train_code_test = pd.DataFrame()
+        for dx in self.df_train['dx'].unique():
+            df = self.df_train[(self.df_train['dx'] == dx) & (self.df_train['set'].isin(["t1","ta"]))]['lesion_id']
             sampled_lesion_ids = np.random.choice(df, size=5, replace=False)
-            sampled_df = self.df_combined[self.df_combined['lesion_id'].isin(sampled_lesion_ids)]
-            self._df_sample_batch = pd.concat([self._df_sample_batch, sampled_df], ignore_index=True)
-        for dx in self.df_combined['dx'].unique():
-            df = self.df_combined[(self.df_combined['dx'] == dx) & (self.df_combined['set'].isin(["v1","va"]))]['lesion_id']
+            sampled_df = self.df_train[self.df_train['lesion_id'].isin(sampled_lesion_ids)]
+            self._df_train_code_test = pd.concat([self._df_train_code_test, sampled_df], ignore_index=True)
+        self._df_val1_code_test = pd.DataFrame()
+        for dx in self.df_val1['dx'].unique():
+            df = self.df_val1[(self.df_val1['dx'] == dx) & (self.df_val1['set'].isin(["v1","va"]))]['lesion_id']
             sampled_lesion_ids = np.random.choice(df, size=2, replace=False)
-            sampled_df = self.df_combined[self.df_combined['lesion_id'].isin(sampled_lesion_ids)]
-            self._df_sample_batch = pd.concat([self._df_sample_batch, sampled_df], ignore_index=True)  
+            sampled_df = self.df_val1[self.df_val1['lesion_id'].isin(sampled_lesion_ids)]
+            self._df_val1_code_test = pd.concat([self._df_val1_code_test, sampled_df], ignore_index=True) 
+        self._df_val_a_code_test = pd.DataFrame()
+        for dx in self.df_val_a['dx'].unique():
+            df = self.df_val_a[(self.df_val_a['dx'] == dx) & (self.df_val_a['set'].isin(["v1","va"]))]['lesion_id']
+            sampled_lesion_ids = np.random.choice(df, size=2, replace=False)
+            sampled_df = self.df_val_a[self.df_val_a['lesion_id'].isin(sampled_lesion_ids)]
+            self._df_val_a_code_test = pd.concat([self._df_val_a_code_test, sampled_df], ignore_index=True)  
         
-        print("See self._df_sample_batch.")     
+        print("self._df_train_code_test, self._df_val1_code_test, self._df_val_a_code_test.")     
                     
     def get_hidden_attributes(self) -> Dict[str, Union[Path, str, dict, int, pd.DataFrame]]:
         return {
             "_csv_file_path": self._csv_file_path,
-            "_label_dict": self._label_dict,
-            "_label_codes": self._label_codes,
+            "label_dict": self.label_dict,
+            "label_codes": self.label_codes,
             "_num_labels": self._num_labels,
             "_df_train1": self._df_train1,
             "_df_train_a": self._df_train_a,
-            "_df_val1": self._df_val1,
-            "_df_val_a": self._df_val_a,
-            "_df_sample_batch": self._df_sample_batch,
-            "_df_balanced": self._df_balanced,
-            "_expanded_val_df": self._df_expanded_val,
-            "df_combined": self.df_combined,
+#             "df_train": self.df_train,
+#             "_df_val1": self._df_val1,
+#             "_df_val_a": self._df_val_a,                        
+            "df_val1": self.df_val1,
+            "df_val_a": self.df_val_a,
+#             "_df_sample_batch": self._df_sample_batch,
+#             "_df_expanded_val": self._df_expanded_val,
+#             "df_combined": self.df_combined,
         }
     
