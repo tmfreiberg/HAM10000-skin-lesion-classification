@@ -73,7 +73,7 @@ class process:
             if self.train_one_img_per_lesion:
                 print("- Balanced training set (one image per lesion): self.df_train")
             else:
-                print("- Balanced training set (all images per lesion): self.df_train")
+                print("- Balanced training set (uses as many different images per lesion as possible): self.df_train")
         else:
             if self.train_one_img_per_lesion:
                 self.df_train = self._df_train1
@@ -87,15 +87,15 @@ class process:
             print(f'- Expanding validation set: will combine {self.val_expansion_factor} predictions into one, for each lesion in val set.')
             # New attribute
             self.df_val1 = self.expand_val(one_img_per_lesion = True)
-            print("- Expanded validation set (one image per lesion): self.df_val1")
+            print(f"- Expanded validation set (one image per lesion, repeated {self.val_expansion_factor} times): self.df_val1")
             self.df_val_a = self.expand_val(one_img_per_lesion = False)
-            print("- Expanded validation set (use more than one image per lesion): self.df_val_a")
+            print(f"- Expanded validation set (use up to {self.val_expansion_factor} different images per lesion, if available): self.df_val_a")
         else:
             # New attribute
             self.df_val1 = self._df_val1
             print("- Validation set (not expanded, one image per lesion): self.df_val1")
             self.df_val_a = self._df_val_a
-            print("- Validation set (not expanded, use more than one image per lesion): self.df_val_a")
+            print("- Validation set (not expanded, use all images of each lesion): self.df_val_a")
 
         # Create a small sample batch dataframe for code testing
         self.sample_batch()

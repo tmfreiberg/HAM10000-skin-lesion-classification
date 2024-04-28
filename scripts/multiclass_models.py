@@ -27,14 +27,18 @@ class image_n_label:
         df: pd.DataFrame,
         label_codes: dict,
         data_dir: Path,
-        transform=None,
-        Print: bool = False,
+        transform: Union[None, 
+                         transforms.Compose, 
+                         List[Callable]] = None,
+        Print: Union[None, bool] = None,
     ) -> (Image, str, str):
         self.df = df[["image_id", "label"]].copy()
         self.label_codes = label_codes
         self.data_dir = data_dir
         self.transform = transform
         self.Print = Print
+        if self.Print is None:
+            self.Print = False
         # We need to reset the index because...KeyError....
         self.df.reset_index(inplace=True)
         # But this eventually throws ValueError: cannot insert level_0, already exists...
@@ -411,109 +415,188 @@ class cnn:
         # Save the dictionary to a JSON file
         with open(file_path, 'w') as json_file:
             json.dump(loss_dict, json_file)
+            
+#     def get_probabilities(
+#             self,
+#             df: pd.DataFrame,
+#             filename: Union[None, str] = None,
+#         ) -> pd.DataFrame:
 
-    def inference(# !!!THIS NEEDS SOME WORK...
-        self,
-        df_infer: pd.DataFrame = None,
-        filename: str = None,
-        Print: bool = False,
-        save: bool = False,
-    ) -> pd.DataFrame:
-        if df_infer is None:
-            df_infer = self.df
+#             if filename is None:
+#                 filename = self._filename
 
-        # Define DataLoader for batch processing
-        inference_data = image_n_label(
-            df_infer, self.label_codes, self.data_dir, self.transform, self.Print
-        )
-        dataloader = DataLoader(
-            inference_data, batch_size=self.batch_size, shuffle=False
-        )
+#             # Define DataLoader for batch processing
+#             data = image_n_label(
+#                 df, self.label_codes, self.data_dir, self.transform, self.Print
+#             )
+#             dataloader = DataLoader(
+#                 data, batch_size=self.batch_size, shuffle=False
+#             )
 
-        model = self.model
-        # Load the model
-        if self.state_dict is None:
-            assert (
-                filename is not None
-            ), "state_dict attribute is None: provide a filename for loading."
-            if filename.endswith(".pth"):
-                filename = filename[:-4]
-            file_path_pth = self.model_dir.joinpath(filename + ".pth")
-            file_path_csv = self.model_dir.joinpath(filename + "_infer.csv")
-            try:
-                model.load_state_dict(torch.load(file_path_pth))
-            except Exception as e:
-                print(f"Error loading {file_path_pth}: {e}.")
-        else:
-            file_path_csv = self.model_dir.joinpath(self._filename + "_infer.csv")
+#             model = self.model
+#             # Load the model
+#             if self.state_dict is None:
+#                 if filename.endswith(".pth"):
+#                     filename = filename[:-4]
+#                 file_path_pth = self.model_dir.joinpath(filename + ".pth")
+#                 try:
+#                     state_dict = torch.load(file_path_pth)
+#                     model.load_state_dict(state_dict)
+#                     self.state_dict = state_dict
+#                 except Exception as e:
+#                     print(f"Error loading {file_path_pth}: {e}.")
 
-        # Set the model to evaluation mode
-        model.eval()
+#             # Set the model to evaluation mode
+#             model.eval()
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
+#             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#             model.to(device)
 
-        # Use DataParallel for parallel processing (if multiple GPUs are available)
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
+#             # Use DataParallel for parallel processing (if multiple GPUs are available)
+#             if torch.cuda.device_count() > 1:
+#                 model = nn.DataParallel(model)
 
-        # Dataframe to store image_id and prediction
-        cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
-        image_id_prob = pd.DataFrame({col_name: pd.NA for col_name in cols}, index=[0])
+#             # Dataframe to store image_id and prediction
+#             cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
+#             image_id_prob = pd.DataFrame({col_name: pd.NA for col_name in cols}, index=[0])
 
-        softmax = nn.Softmax(dim=1)
-        # Iterate through the DataLoader and make predictions
-        with torch.no_grad():
-            for images, labels, image_ids in dataloader:
-                # Send input tensor to device
-                images = images.to(device)
-                # Make predictions using the model
-                outputs = model(images)
-                # Apply softmax to get probabilities
-                probabilities = softmax(outputs)
+#             softmax = nn.Softmax(dim=1)
+#             # Iterate through the DataLoader and make predictions
+#             with torch.no_grad():
+#                 for images, labels, image_ids in dataloader:
+#                     # Send input tensor to device
+#                     images = images.to(device)
+#                     # Make predictions using the model
+#                     outputs = model(images)
+#                     # Apply softmax to get probabilities
+#                     probabilities = softmax(outputs)
 
-                # Move probabilities to CPU before converting to NumPy array
-                probabilities_cpu = probabilities.cpu().numpy()
+#                     # Move probabilities to CPU before converting to NumPy array
+#                     probabilities_cpu = probabilities.cpu().numpy()
 
-                series_dict = {}
-                series_dict["image_id"] = pd.Series(image_ids)
+#                     series_dict = {}
+#                     series_dict["image_id"] = pd.Series(image_ids)
 
-                for idx, label in enumerate(self.label_codes.values()):
-                    series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
+#                     for idx, label in enumerate(self.label_codes.values()):
+#                         series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
 
-                batch_df = pd.DataFrame(series_dict)
+#                     batch_df = pd.DataFrame(series_dict)
 
-                image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)
+#                     image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)
 
-        # This dataframe contains "image_id" column and a probability column for each class.
-        image_id_prob = image_id_prob.dropna(subset=["image_id"])
+#             # This dataframe contains "image_id" column and a probability column for each class.
+#             image_id_prob = image_id_prob.dropna(subset=["image_id"])
 
-        # Merge it with the underlying metadata dataframe (or whatever was passed as df_infer).
-        try:
-            inference_df = pd.merge(df_infer, image_id_prob, on="image_id", how="left")
-        except Exception as e:
-            print(f"Error merging inference dataframe with input dataframe: {e}")
+#             # Merge it with the underlying metadata dataframe (or whatever was passed as df).
+#             try:
+#                 df_probabilities = pd.merge(df, image_id_prob, on="image_id", how="left")
+#             except Exception as e:
+#                 print(f"Error merging inference dataframe with input dataframe: {e}")
 
-        # Add this new dataframe with inferences as a hidden attribute to self; also, save it as a csv file.
-        if save:
-            try:
-                print(
-                    "Assigning inference dataframe to new attribute self._df_inference."
-                )
-                # New attribute
-                self._df_inference = inference_df
-                try:
-                    print(f"Saving dataframe as {file_path_csv}")
-                    inference_df.to_csv(file_path_csv, index=False)
-                except Exception as e:
-                    print(
-                        f"Error assigning inference dataframe to new attribute self._df_inference: {e}"
-                    )
-            except Exception as e:
-                print(f"Error saving dataframe to csv file: {e}")
+#             return df_probabilities            
 
-        # Return the inference dataframe.
-        return inference_df
+#     def inference(# !!!THIS NEEDS SOME WORK...
+#         self,
+#         df_infer: Union[None, pd.DataFrame] = None,
+#         filename: Union[None, str] = None,
+#         Print: Union[None, bool] = False,
+#         save: Union[None, bool] = False,
+#     ) -> pd.DataFrame:
+#         if df_infer is None:
+#             df_infer = self.df
+
+#         # Define DataLoader for batch processing
+#         inference_data = image_n_label(
+#             df_infer, self.label_codes, self.data_dir, self.transform, self.Print
+#         )
+#         dataloader = DataLoader(
+#             inference_data, batch_size=self.batch_size, shuffle=False
+#         )
+
+#         model = self.model
+#         # Load the model
+#         if self.state_dict is None:
+#             assert (
+#                 filename is not None
+#             ), "state_dict attribute is None: provide a filename for loading."
+#             if filename.endswith(".pth"):
+#                 filename = filename[:-4]
+#             file_path_pth = self.model_dir.joinpath(filename + ".pth")
+#             file_path_csv = self.model_dir.joinpath(filename + "_infer.csv")
+#             try:
+#                 model.load_state_dict(torch.load(file_path_pth))
+#             except Exception as e:
+#                 print(f"Error loading {file_path_pth}: {e}.")
+#         else:
+#             file_path_csv = self.model_dir.joinpath(self._filename + "_infer.csv")
+
+#         # Set the model to evaluation mode
+#         model.eval()
+
+#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#         model.to(device)
+
+#         # Use DataParallel for parallel processing (if multiple GPUs are available)
+#         if torch.cuda.device_count() > 1:
+#             model = nn.DataParallel(model)
+
+#         # Dataframe to store image_id and prediction
+#         cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
+#         image_id_prob = pd.DataFrame({col_name: pd.NA for col_name in cols}, index=[0])
+
+#         softmax = nn.Softmax(dim=1)
+#         # Iterate through the DataLoader and make predictions
+#         with torch.no_grad():
+#             for images, labels, image_ids in dataloader:
+#                 # Send input tensor to device
+#                 images = images.to(device)
+#                 # Make predictions using the model
+#                 outputs = model(images)
+#                 # Apply softmax to get probabilities
+#                 probabilities = softmax(outputs)
+
+#                 # Move probabilities to CPU before converting to NumPy array
+#                 probabilities_cpu = probabilities.cpu().numpy()
+
+#                 series_dict = {}
+#                 series_dict["image_id"] = pd.Series(image_ids)
+
+#                 for idx, label in enumerate(self.label_codes.values()):
+#                     series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
+
+#                 batch_df = pd.DataFrame(series_dict)
+
+#                 image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)
+
+#         # This dataframe contains "image_id" column and a probability column for each class.
+#         image_id_prob = image_id_prob.dropna(subset=["image_id"])
+
+#         # Merge it with the underlying metadata dataframe (or whatever was passed as df_infer).
+#         try:
+#             inference_df = pd.merge(df_infer, image_id_prob, on="image_id", how="left")
+#         except Exception as e:
+#             print(f"Error merging inference dataframe with input dataframe: {e}")
+
+#         # Add this new dataframe with inferences as a hidden attribute to self; also, save it as a csv file.
+#         if save:
+#             try:
+#                 print(
+#                     "Probabilities dataframe: self.df_probabilities"
+#                 )
+#                 # New attribute
+#                 self.df_probabilities = inference_df
+#                 try:
+#                     print(f"Saving dataframe as {file_path_csv}")
+#                     inference_df.to_csv(file_path_csv, index=False)
+#                 except Exception as e:
+#                     print(
+#                         f"Error assigning probabilities dataframe to new attribute self.df_probabilities: {e}"
+#                     )
+#             except Exception as e:
+#                 print(f"Error saving dataframe to csv file: {e}")
+
+#         # Return the inference dataframe.
+#         return inference_df
 
     def prediction(
         self, lesion_or_image_id: str, filename: str = None
@@ -617,6 +700,98 @@ class cnn:
 '''
 END CNN CLASS
 '''
+
+def get_probabilities(
+        df: pd.DataFrame,
+        data_dir: Path,
+        model_dir: Path,
+        model: Union[None, models.ResNet, models.EfficientNet],
+        filename: str,
+        label_codes: Union[None,dict],
+        transform: Union[None, 
+                         transforms.Compose, 
+                         List[Callable]] = None,
+        batch_size: Union[None, int] = None,
+        Print: Union[None, bool] = None,                    
+       ) -> pd.DataFrame:
+                
+        if label_codes is None:
+            try:
+                vc = df[['label','dx']].value_counts()
+                label_codes = {}
+                for key, value in vc.index:
+                    if key not in label_codes:
+                        label_codes[key] = value
+                    else:
+                        label_codes[key] = 'other'
+            except Exception as e:
+                print(f"Error reconstructing label codes: enter a label_codes dictionary: {e}")
+        
+        if batch_size is None:
+            batch_size = 32
+        
+        if Print is None:
+            Print = False            
+
+        # Define DataLoader for batch processing
+        data = image_n_label(df, label_codes, data_dir, transform, Print)
+        dataloader = DataLoader(data, batch_size=batch_size, shuffle=False)
+
+        if filename.endswith(".pth"):
+            filename = filename[:-4]
+        file_path_pth = model_dir.joinpath(filename + ".pth")
+        try:
+            state_dict = torch.load(file_path_pth) 
+            model.load_state_dict(state_dict)            
+        except Exception as e:
+            print(f"Error loading {file_path_pth}: {e}.")
+
+        # Set the model to evaluation mode
+        model.eval()
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+
+        # Use DataParallel for parallel processing (if multiple GPUs are available)
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
+
+        # Dataframe to store image_id and prediction
+        cols = ["image_id"] + ["prob_" + label for label in label_codes.values()]
+        image_id_prob_list = []
+
+        softmax = nn.Softmax(dim=1)
+        # Iterate through the DataLoader and make predictions
+        with torch.no_grad():
+            for images, labels, image_ids in dataloader:
+                # Send input tensor to device
+                images = images.to(device)
+                # Make predictions using the model
+                outputs = model(images)
+                # Apply softmax to get probabilities
+                probabilities = softmax(outputs)
+
+                # Move probabilities to CPU before converting to NumPy array
+                probabilities_cpu = probabilities.cpu().numpy()
+
+                series_dict = {}
+                series_dict["image_id"] = pd.Series(image_ids)
+
+                for idx, label in enumerate(label_codes.values()):
+                    series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
+
+                batch_df = pd.DataFrame(series_dict)
+                image_id_prob_list.append(batch_df)
+
+        # Concatenate all DataFrames in image_id_prob_list
+        image_id_prob = pd.concat(image_id_prob_list, axis=0)        
+        image_id_prob=image_id_prob.reset_index(drop=True)
+        df_probabilities = df.merge(image_id_prob, left_index=True, right_index=True)
+        if (df_probabilities['image_id_x'] == df_probabilities['image_id_y']).all():
+            df_probabilities.drop('image_id_y', axis=1, inplace=True)
+            df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
+
+        return df_probabilities 
     
 def aggregate_probabilities(df: pd.DataFrame,
                             method_dict: Union[None, dict] = None,
