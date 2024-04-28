@@ -30,9 +30,12 @@ class image_n_label:
         transform: Union[None, 
                          transforms.Compose, 
                          List[Callable]] = None,
-        Print: Union[None, bool] = None,
+        Print: Union[None, bool] = None,        
     ) -> (Image, str, str):
-        self.df = df[["image_id", "label"]].copy()
+        if "label" in df.columns:
+            self.df = df[["image_id", "label"]].copy()
+        else:
+            self.df = df[["image_id"]].copy()
         self.label_codes = label_codes
         self.data_dir = data_dir
         self.transform = transform
@@ -52,17 +55,22 @@ class image_n_label:
     def __getitem__(self, idx):
         img_name = self.data_dir.joinpath(self.df.loc[idx, "image_id"] + ".jpg")
         image = Image.open(img_name)
-        code = self.df.loc[idx, "label"]
-        # One-hot encoding the labels
-        label = torch.zeros(len(self.label_codes))
-        label[code] = 1
         image_id = self.df.loc[idx, "image_id"]
-
+        
         if self.transform:
-            image = self.transform(image)
-
-        if self.Print:
-            print(f"image_id, label, ohe-label: {image_id}, {code}, {label}")
+                image = self.transform(image)
+                
+        if "label" in self.df.columns:
+            code = self.df.loc[idx, "label"]
+            # One-hot encoding the labels
+            label = torch.zeros(len(self.label_codes))
+            label[code] = 1
+            
+            if self.Print:
+                print(f"image_id, label, ohe-label: {image_id}, {code}, {label}")
+        else:
+            label = torch.empty(0)
+        
         return image, label, image_id
 
 
@@ -414,214 +422,32 @@ class cnn:
         print(f"Epoch losses dictionary save as {file_path}")
         # Save the dictionary to a JSON file
         with open(file_path, 'w') as json_file:
-            json.dump(loss_dict, json_file)
-            
-#     def get_probabilities(
-#             self,
-#             df: pd.DataFrame,
-#             filename: Union[None, str] = None,
-#         ) -> pd.DataFrame:
+            json.dump(loss_dict, json_file)            
 
-#             if filename is None:
-#                 filename = self._filename
-
-#             # Define DataLoader for batch processing
-#             data = image_n_label(
-#                 df, self.label_codes, self.data_dir, self.transform, self.Print
-#             )
-#             dataloader = DataLoader(
-#                 data, batch_size=self.batch_size, shuffle=False
-#             )
-
-#             model = self.model
-#             # Load the model
-#             if self.state_dict is None:
-#                 if filename.endswith(".pth"):
-#                     filename = filename[:-4]
-#                 file_path_pth = self.model_dir.joinpath(filename + ".pth")
-#                 try:
-#                     state_dict = torch.load(file_path_pth)
-#                     model.load_state_dict(state_dict)
-#                     self.state_dict = state_dict
-#                 except Exception as e:
-#                     print(f"Error loading {file_path_pth}: {e}.")
-
-#             # Set the model to evaluation mode
-#             model.eval()
-
-#             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#             model.to(device)
-
-#             # Use DataParallel for parallel processing (if multiple GPUs are available)
-#             if torch.cuda.device_count() > 1:
-#                 model = nn.DataParallel(model)
-
-#             # Dataframe to store image_id and prediction
-#             cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
-#             image_id_prob = pd.DataFrame({col_name: pd.NA for col_name in cols}, index=[0])
-
-#             softmax = nn.Softmax(dim=1)
-#             # Iterate through the DataLoader and make predictions
-#             with torch.no_grad():
-#                 for images, labels, image_ids in dataloader:
-#                     # Send input tensor to device
-#                     images = images.to(device)
-#                     # Make predictions using the model
-#                     outputs = model(images)
-#                     # Apply softmax to get probabilities
-#                     probabilities = softmax(outputs)
-
-#                     # Move probabilities to CPU before converting to NumPy array
-#                     probabilities_cpu = probabilities.cpu().numpy()
-
-#                     series_dict = {}
-#                     series_dict["image_id"] = pd.Series(image_ids)
-
-#                     for idx, label in enumerate(self.label_codes.values()):
-#                         series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
-
-#                     batch_df = pd.DataFrame(series_dict)
-
-#                     image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)
-
-#             # This dataframe contains "image_id" column and a probability column for each class.
-#             image_id_prob = image_id_prob.dropna(subset=["image_id"])
-
-#             # Merge it with the underlying metadata dataframe (or whatever was passed as df).
-#             try:
-#                 df_probabilities = pd.merge(df, image_id_prob, on="image_id", how="left")
-#             except Exception as e:
-#                 print(f"Error merging inference dataframe with input dataframe: {e}")
-
-#             return df_probabilities            
-
-#     def inference(# !!!THIS NEEDS SOME WORK...
-#         self,
-#         df_infer: Union[None, pd.DataFrame] = None,
-#         filename: Union[None, str] = None,
-#         Print: Union[None, bool] = False,
-#         save: Union[None, bool] = False,
-#     ) -> pd.DataFrame:
-#         if df_infer is None:
-#             df_infer = self.df
-
-#         # Define DataLoader for batch processing
-#         inference_data = image_n_label(
-#             df_infer, self.label_codes, self.data_dir, self.transform, self.Print
-#         )
-#         dataloader = DataLoader(
-#             inference_data, batch_size=self.batch_size, shuffle=False
-#         )
-
-#         model = self.model
-#         # Load the model
-#         if self.state_dict is None:
-#             assert (
-#                 filename is not None
-#             ), "state_dict attribute is None: provide a filename for loading."
-#             if filename.endswith(".pth"):
-#                 filename = filename[:-4]
-#             file_path_pth = self.model_dir.joinpath(filename + ".pth")
-#             file_path_csv = self.model_dir.joinpath(filename + "_infer.csv")
-#             try:
-#                 model.load_state_dict(torch.load(file_path_pth))
-#             except Exception as e:
-#                 print(f"Error loading {file_path_pth}: {e}.")
-#         else:
-#             file_path_csv = self.model_dir.joinpath(self._filename + "_infer.csv")
-
-#         # Set the model to evaluation mode
-#         model.eval()
-
-#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#         model.to(device)
-
-#         # Use DataParallel for parallel processing (if multiple GPUs are available)
-#         if torch.cuda.device_count() > 1:
-#             model = nn.DataParallel(model)
-
-#         # Dataframe to store image_id and prediction
-#         cols = ["image_id"] + ["prob_" + label for label in self.label_codes.values()]
-#         image_id_prob = pd.DataFrame({col_name: pd.NA for col_name in cols}, index=[0])
-
-#         softmax = nn.Softmax(dim=1)
-#         # Iterate through the DataLoader and make predictions
-#         with torch.no_grad():
-#             for images, labels, image_ids in dataloader:
-#                 # Send input tensor to device
-#                 images = images.to(device)
-#                 # Make predictions using the model
-#                 outputs = model(images)
-#                 # Apply softmax to get probabilities
-#                 probabilities = softmax(outputs)
-
-#                 # Move probabilities to CPU before converting to NumPy array
-#                 probabilities_cpu = probabilities.cpu().numpy()
-
-#                 series_dict = {}
-#                 series_dict["image_id"] = pd.Series(image_ids)
-
-#                 for idx, label in enumerate(self.label_codes.values()):
-#                     series_dict["prob_" + label] = pd.Series(probabilities_cpu[:, idx])
-
-#                 batch_df = pd.DataFrame(series_dict)
-
-#                 image_id_prob = pd.concat([image_id_prob, batch_df], axis=0)
-
-#         # This dataframe contains "image_id" column and a probability column for each class.
-#         image_id_prob = image_id_prob.dropna(subset=["image_id"])
-
-#         # Merge it with the underlying metadata dataframe (or whatever was passed as df_infer).
+#     def prediction(
+#         self, lesion_or_image_id: str, filename: str = None
+#     ) -> Union[None, pd.DataFrame]:
+#         # If we just want to make a prediction for one or a few lesions/images:
 #         try:
-#             inference_df = pd.merge(df_infer, image_id_prob, on="image_id", how="left")
-#         except Exception as e:
-#             print(f"Error merging inference dataframe with input dataframe: {e}")
-
-#         # Add this new dataframe with inferences as a hidden attribute to self; also, save it as a csv file.
-#         if save:
-#             try:
-#                 print(
-#                     "Probabilities dataframe: self.df_probabilities"
+#             if lesion_or_image_id[0] == "I":
+#                 dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(
+#                     deep=True
 #                 )
-#                 # New attribute
-#                 self.df_probabilities = inference_df
-#                 try:
-#                     print(f"Saving dataframe as {file_path_csv}")
-#                     inference_df.to_csv(file_path_csv, index=False)
-#                 except Exception as e:
-#                     print(
-#                         f"Error assigning probabilities dataframe to new attribute self.df_probabilities: {e}"
-#                     )
-#             except Exception as e:
-#                 print(f"Error saving dataframe to csv file: {e}")
+#             elif lesion_or_image_id[0] == "H":
+#                 dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(
+#                     deep=True
+#                 )
+#             else:
+#                 raise ValueError(f"Invalid ID: {lesion_or_image_id}")
+#         except KeyError as ke:
+#             raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
+#         except Exception as e:
+#             raise ValueError(f"Error processing ID: {e}")
 
-#         # Return the inference dataframe.
-#         return inference_df
+#         # Now just call inference on this mini-dataframe:
+#         output = self.inference(dataframe, filename)
 
-    def prediction(
-        self, lesion_or_image_id: str, filename: str = None
-    ) -> Union[None, pd.DataFrame]:
-        # If we just want to make a prediction for one or a few lesions/images:
-        try:
-            if lesion_or_image_id[0] == "I":
-                dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(
-                    deep=True
-                )
-            elif lesion_or_image_id[0] == "H":
-                dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(
-                    deep=True
-                )
-            else:
-                raise ValueError(f"Invalid ID: {lesion_or_image_id}")
-        except KeyError as ke:
-            raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
-        except Exception as e:
-            raise ValueError(f"Error processing ID: {e}")
-
-        # Now just call inference on this mini-dataframe:
-        output = self.inference(dataframe, filename)
-
-        return output
+#         return output
 
     def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, models.ResNet, models.EfficientNet, None]]:
         attributes_dict = {
@@ -701,6 +527,80 @@ class cnn:
 END CNN CLASS
 '''
 
+def df_from_ids(filenames: Union[None, str, list] = None,
+                     multiplicity: Union[None, int] = None,
+                     lesion_ids: Union[None, str, list] = None,
+                     df: Union[None, pd.DataFrame] = None,
+                     one_img_per_lesion: Union[None, bool] = None,) -> pd.DataFrame:
+    if filenames is not None:
+        filenames = pd.Series(filenames)
+        filenames = filenames.apply(lambda x: x[:x.rfind('.')] if '.' in x else x)
+        filenames.name = "image_id"
+        if multiplicity is not None:
+            filenames = filenames.repeat(multiplicity).reset_index(drop=True)
+        filenames_df = pd.DataFrame(filenames)
+        return filenames_df
+    elif lesion_ids is not None:
+        assert all(condition for condition in [isinstance(df, pd.DataFrame), 'image_id' in df.columns, 'lesion_id' in df.columns]), "Invalid DataFrame or missing columns"
+        if multiplicity is not None and one_img_per_lesion is None:
+            one_img_per_lesion = False
+        lesion_ids = pd.Series(lesion_ids)
+        working_df = df[df['lesion_id'].isin(lesion_ids)].copy()
+        if working_df.empty:
+            return working_df
+        working_df.drop_duplicates(subset='image_id')
+        if one_img_per_lesion is None:            
+            return working_df
+        elif one_img_per_lesion:
+            if multiplicity is None:
+                return working_df.drop_duplicates(subset='lesion_id')
+            else:
+                working_df = working_df.drop_duplicates(subset='lesion_id')
+                working_df_repeat = working_df.reindex(working_df.index.repeat(multiplicity)).reset_index(drop=True)
+            return working_df_repeat
+        
+        # else... not one_img_per_lesion
+        elif multiplicity is None:
+            return working_df 
+        # else...  not one_img_per_lesion and multiplicity is something               
+        else:
+            if "num_images" in working_df.columns:
+                # We'll drop the column and put it back in in case the numbers don't mean what we think they mean
+                working_df.drop('num_images', axis=1, inplace=True)
+            working_df.insert(1, "num_images", working_df["lesion_id"].map(working_df["lesion_id"].value_counts()),)
+
+            m = multiplicity
+            sample_image_list = []
+
+            working_df['q'], working_df['r'] = divmod(m,df['num_images']) 
+
+            # m = q*num_images + r. We want q copies of each image corresponding to this lesion_id, plus a further one copy of r of them.
+            x = working_df.apply(lambda row: [row['image_id']] * row['q'], axis=1)
+
+            # Add these to the list
+            sample_image_list.extend([item for sublist in x for item in sublist])
+
+            # Now for the r 'leftover' images for each lesion
+            y_df = pd.DataFrame(columns=working_df.columns)
+            y_df = working_df.groupby('lesion_id').apply(lambda group: group.sample(n=group['r'].iloc[0])).reset_index(drop=True)
+            y = y_df['image_id'].tolist()
+
+            # Add them to the list
+            sample_image_list.extend(y)
+
+            sample_image_list_counts = pd.Series(sample_image_list).groupby(pd.Series(sample_image_list)).size().reset_index(name='img_mult')
+
+            # Merge df with sample_image_list_counts based on 'image_id'
+            working_df = pd.merge(working_df, sample_image_list_counts, left_on='image_id', right_on='index', how='inner')
+
+            # Expand rows based on 'img_mult' column
+            working_df = working_df.loc[working_df.index.repeat(working_df['img_mult'])].reset_index(drop=True)
+
+            # Drop the temporary 'index' columns
+            working_df.drop(['index', 'q', 'r', 'img_mult'], axis=1, inplace=True)
+
+            return working_df                    
+
 def get_probabilities(
         df: pd.DataFrame,
         data_dir: Path,
@@ -712,9 +612,11 @@ def get_probabilities(
                          transforms.Compose, 
                          List[Callable]] = None,
         batch_size: Union[None, int] = None,
-        Print: Union[None, bool] = None,                    
+        Print: Union[None, bool] = None,
+        save_as: Union[None, str] = None,
        ) -> pd.DataFrame:
-                
+    
+    try:                
         if label_codes is None:
             try:
                 vc = df[['label','dx']].value_counts()
@@ -726,19 +628,22 @@ def get_probabilities(
                         label_codes[key] = 'other'
             except Exception as e:
                 print(f"Error reconstructing label codes: enter a label_codes dictionary: {e}")
-        
+
         if batch_size is None:
             batch_size = 32
-        
+
         if Print is None:
             Print = False            
 
-        # Define DataLoader for batch processing
-        data = image_n_label(df, label_codes, data_dir, transform, Print)
+        # Define DataLoader for batch processing        
+        data = image_n_label(df, label_codes, data_dir, transform, Print)        
         dataloader = DataLoader(data, batch_size=batch_size, shuffle=False)
 
-        if filename.endswith(".pth"):
-            filename = filename[:-4]
+        if model is None:
+            raise ValueError("Model is not provided.")
+
+        if '.' in filename:
+            filename = filename[:filename.rindex('.')] 
         file_path_pth = model_dir.joinpath(filename + ".pth")
         try:
             state_dict = torch.load(file_path_pth) 
@@ -763,7 +668,7 @@ def get_probabilities(
         softmax = nn.Softmax(dim=1)
         # Iterate through the DataLoader and make predictions
         with torch.no_grad():
-            for images, labels, image_ids in dataloader:
+            for images, _, image_ids in dataloader: # NB: labels are skipped (_)
                 # Send input tensor to device
                 images = images.to(device)
                 # Make predictions using the model
@@ -791,7 +696,43 @@ def get_probabilities(
             df_probabilities.drop('image_id_y', axis=1, inplace=True)
             df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
 
+        # Save to file (if applicable)
+        if save_as is not None:
+            save_as = save_as + "_probabilities.csv"
+            file_path = model_dir.joinpath(save_as)
+            print(f"Saving probabilities: {file_path}")
+            df_probabilities.to_csv(file_path)
+
         return df_probabilities 
+        
+    except Exception as e:
+        print(f"Error in get_probabilities: {e}")
+        return df 
+    
+def prediction(lesion_or_image_id: str, 
+               filename: str = None,
+               ) -> Union[None, pd.DataFrame]:
+    # If we just want to make a prediction for one or a few lesions/images:
+    try:
+        if lesion_or_image_id[0] == "I":
+            dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(
+                deep=True
+            )
+        elif lesion_or_image_id[0] == "H":
+            dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(
+                deep=True
+            )
+        else:
+            raise ValueError(f"Invalid ID: {lesion_or_image_id}")
+    except KeyError as ke:
+        raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
+    except Exception as e:
+        raise ValueError(f"Error processing ID: {e}")
+
+    # Now just call inference on this mini-dataframe:
+    output = self.inference(dataframe, filename)
+
+    return output    
     
 def aggregate_probabilities(df: pd.DataFrame,
                             method_dict: Union[None, dict] = None,
@@ -928,3 +869,20 @@ def predictions_mode(df: pd.DataFrame,
     mode_df = df.groupby('lesion_id')[pred_col].agg(mode_with_random)
     output = df.merge(mode_df, left_on='lesion_id', right_index=True, suffixes=('', '_mode')).drop('pred', axis=1)
     return output
+
+def load_dict(model_dir: Path, filename: str) -> dict:
+    if '.' in filename:
+        filename = filename[:filename.rindex('.')]       
+    file_path = model_dir.joinpath(filename + ".json")
+    
+    loaded_dict = {}
+    
+    if file_path.is_file():
+        with open(file_path, "r", encoding="utf-8") as file:
+            try:
+                data = json.load(file)  # Load the entire JSON content
+                loaded_dict.update(data)  # Update the dictionary with loaded data
+            except json.JSONDecodeError as e:
+                print(f"Error decoding JSON in file {file_path}: {e}")
+    
+    return loaded_dict
