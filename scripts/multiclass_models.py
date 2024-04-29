@@ -4,14 +4,13 @@ import pandas as pd
 import numpy as np
 from processing import process
 from utils import display, print_header
-# from IPython.display import display
 from PIL import Image
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from typing import List, Callable, Dict, Union
+from typing import List, Callable, Dict, Union, Tuple
 from torchvision.transforms import Compose, Resize, ToTensor
 import torchvision.transforms as transforms
 import torch.optim as optim
@@ -900,3 +899,110 @@ def load_dict(model_dir: Path, filename: str) -> dict:
                 print(f"Error decoding JSON in file {file_path}: {e}")
     
     return loaded_dict
+
+# For making trivial predictions
+def trivial_prediction(
+    y_train: Union[np.ndarray, pd.DataFrame, pd.Series],  # targets from training set
+    label_codes: Union[None, dict],
+    class_probs: str = "zero_one",  # or 'proportion', or 'uniform'
+    pos_label_code: Union[int, None] = None,  # code of desired positive label
+    pos_label: Union[
+        int, str
+    ] = "majority_class",  # or 'minority_class', or a value in label_codes (i.e. original_class_name)
+    num_preds: Union[int, None] = None,  # number of trivial predictions to be made
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    # We'll deal with numpy arrays only...
+    if isinstance(y_train, (pd.DataFrame, pd.Series)):
+        y_train_arr = y_train.values
+    else:
+        y_train_arr = y_train
+
+    # We assume the target is 1-dimensional
+    if np.ravel(y_train_arr).shape[0] != y_train_arr.shape[0]:
+        return
+
+    # If class_codes dictionary is not given, we'll re-create it
+    if label_codes is None:
+        classes = np.unique(y_train_arr)
+        try:
+            classes.sort()
+        except:
+            pass
+        label_codes = {
+            idx: classes_element for idx, classes_element in enumerate(classes)
+        }
+    inverse_label_codes = { v : k for k, v in label_codes.items() }
+
+    # Create dictionary whose items are of the form cc : f, where cc is a class code and f is its frequency
+    # Initialize the dictionary with frequencies set to zero
+    value_counts_dict = dict.fromkeys(label_codes.keys(), 0)
+
+    # Produce list of values and list of counts, where values[i] has frequency counts[i]
+    values, counts = np.unique(y_train_arr, return_counts=True)
+
+    # For values (class codes) with count (frequency) at least one, update the corresponding dictionary item
+    for value, count in zip(values, counts):
+        value_counts_dict[value] = count
+
+    # Find the maximum frequency among class code frequencies
+    M = max([v for k, v in value_counts_dict.items()])
+
+    # The first class code with this frequency will be called the majority class
+    majority_class_code = next(
+        (k for k, v in value_counts_dict.items() if v == M), None
+    )
+
+    # We now set the prediction_code, i.e. the class code of the trivial prediction we want to make
+    if pos_label_code is not None and pos_label_code in label_codes.keys():
+        prediction_code = pos_label_code
+    elif type(pos_label) == str and "maj" in pos_label:
+        pos_label = "majority_class"
+        prediction_code = majority_class_code
+    elif type(pos_label) == str and "min" in pos_label:
+        pos_label = "minority_class"
+        m = min([v for k, v in value_counts_dict.items() if v != 0])
+        minority_class_code = next(
+            (k for k, v in value_counts_dict.items() if v == m), None
+        )
+        prediction_code = minority_class_code
+    else:
+        try:
+            prediction_code = inverse_label_codes[pos_label]
+        except:
+            pos_label = "majority_class"
+            prediction_code = majority_class_code
+
+    # Produce an array of desired dimensions, with the trivial prediction code
+    if num_preds is None:
+        num_preds = y_train.shape[0]
+
+    trivial_prediction_code = np.full(num_preds, fill_value=prediction_code)
+
+    # And do the same but with the unencoded prediction
+    trivial_prediction = np.full(
+        num_preds, fill_value=label_codes[prediction_code]
+    )
+
+    # Now for the probabilities
+    # Certain choices for class_probs are incompatible with choices for pos_label
+    # E.g. class_probs = 'proportion' is incompatible with pos_label = 'minority_class'
+    if "p" in class_probs and pos_label == "minority_class":
+        class_probs = "zero_one"  # could also be 'uniform'
+
+    # Initialize the probabilities array
+    trivial_probabilities = np.zeros((num_preds, len(label_codes)))
+
+    # Fill in the probabilities
+    if "z" in class_probs:
+        class_probs = "zero_one"
+        trivial_probabilities[:, prediction_code] = 1
+    elif "p" in class_probs:
+        class_probs = "proportion"
+        for c, cc in class_codes.items():
+            trivial_probabilities[:, cc] = value_counts_dict[cc] / y_train_arr.shape[0]
+    else:
+        class_probs = "uniform"
+        trivial_probabilities += 1 / len(class_codes)
+
+    return trivial_prediction, trivial_prediction_code, trivial_probabilities
