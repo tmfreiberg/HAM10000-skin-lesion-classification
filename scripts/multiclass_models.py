@@ -147,7 +147,7 @@ class cnn:
         if self.batch_size is None:
             self.batch_size = 32
         if self.epochs is None:
-            self.epochs = 32
+            self.epochs = 10
         if self.base_learning_rate is None:
             self.base_learning_rate = 1/1000
         if self.filename_stem is None:
@@ -251,7 +251,17 @@ class cnn:
             testcode += "test"        
 
         # Initial filename without suffix
-        base_filename = "_".join([self.filename_stem, tcode, balance_code, testcode, str(self.epochs) + "e",])
+        elements = [self.filename_stem]
+        if tcode:
+            elements.append(tcode)
+        if balance_code:
+            elements.append(balance_code)
+        if testcode:
+            elements.append(testcode)
+        elements.append(str(self.epochs) + "e")
+
+        base_filename = "_".join(elements)
+#         base_filename = "_".join([self.filename_stem, tcode, balance_code, testcode, str(self.epochs) + "e",])
 
         # Find a unique filename by incrementing a counter
         counter = 0
