@@ -671,11 +671,19 @@ def get_probabilities(
 
                 batch_df = pd.DataFrame(series_dict)
                 image_id_prob_list.append(batch_df)
-
+       
         # Concatenate all DataFrames in image_id_prob_list
-        image_id_prob = pd.concat(image_id_prob_list, axis=0)        
-        image_id_prob=image_id_prob.reset_index(drop=True)
-        df_probabilities = df.merge(image_id_prob, left_index=True, right_index=True)
+        image_id_prob = pd.concat(image_id_prob_list, axis=0) 
+        # Combine...
+#         image_id_prob=image_id_prob.reset_index(drop=True)
+#         df_probabilities = df.merge(image_id_prob, left_index=True, right_index=True)
+#         if (df_probabilities['image_id_x'] == df_probabilities['image_id_y']).all():
+#             df_probabilities.drop('image_id_y', axis=1, inplace=True)
+#             df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
+        # Sort then combine...            
+        image_id_prob_sorted = image_id_prob.sort_values(by='image_id')
+        df_sorted = df.sort_values(by='image_id')    
+        df_probabilities = df_sorted.merge(image_id_prob_sorted, left_index=True, right_index=True)        
         if (df_probabilities['image_id_x'] == df_probabilities['image_id_y']).all():
             df_probabilities.drop('image_id_y', axis=1, inplace=True)
             df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
