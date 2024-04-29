@@ -424,31 +424,6 @@ class cnn:
         with open(file_path, 'w') as json_file:
             json.dump(loss_dict, json_file)            
 
-#     def prediction(
-#         self, lesion_or_image_id: str, filename: str = None
-#     ) -> Union[None, pd.DataFrame]:
-#         # If we just want to make a prediction for one or a few lesions/images:
-#         try:
-#             if lesion_or_image_id[0] == "I":
-#                 dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(
-#                     deep=True
-#                 )
-#             elif lesion_or_image_id[0] == "H":
-#                 dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(
-#                     deep=True
-#                 )
-#             else:
-#                 raise ValueError(f"Invalid ID: {lesion_or_image_id}")
-#         except KeyError as ke:
-#             raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
-#         except Exception as e:
-#             raise ValueError(f"Error processing ID: {e}")
-
-#         # Now just call inference on this mini-dataframe:
-#         output = self.inference(dataframe, filename)
-
-#         return output
-
     def get_hidden_attributes(self) -> Dict[str, Union[Path, str, list, int, float, bool, dict, pd.DataFrame, transforms.Compose, models.ResNet, models.EfficientNet, None]]:
         attributes_dict = {
         "self.df": self.df,
@@ -707,82 +682,117 @@ def get_probabilities(
         
     except Exception as e:
         print(f"Error in get_probabilities: {e}")
-        return df 
+        return df    
     
-def prediction(lesion_or_image_id: str, 
-               filename: str = None,
-               ) -> Union[None, pd.DataFrame]:
-    # If we just want to make a prediction for one or a few lesions/images:
-    try:
-        if lesion_or_image_id[0] == "I":
-            dataframe = self.df[self.df["image_id"] == lesion_or_image_id].copy(
-                deep=True
-            )
-        elif lesion_or_image_id[0] == "H":
-            dataframe = self.df[self.df["lesion_id"] == lesion_or_image_id].copy(
-                deep=True
-            )
-        else:
-            raise ValueError(f"Invalid ID: {lesion_or_image_id}")
-    except KeyError as ke:
-        raise ValueError(f"ID not found in DataFrame: {lesion_or_image_id}") from ke
-    except Exception as e:
-        raise ValueError(f"Error processing ID: {e}")
-
-    # Now just call inference on this mini-dataframe:
-    output = self.inference(dataframe, filename)
-
-    return output    
+def final_prediction(raw_probabilities_df: pd.DataFrame,
+                     label_codes: Dict[int, str],
+                     aggregate_method: Union[None, Dict[str, List[str]]] = None,
+                     threshold_dict_help: Union[None, OrderedDict[str, float]] = None,
+                     threshold_dict_hinder: Union[None, OrderedDict[str, float]] = None,  
+                     votes_to_win_dict: Union[None, OrderedDict[str, int]] = None,
+                     prefix: Union[None, str] = None,) -> pd.DataFrame:
+    
+    if prefix is None:
+        prefix = 'prob_'
+    
+    assert 'image_id' in raw_probabilities_df.columns, "DataFrame must contain image_id column."
+    has_prob_column = any(col.startswith(prefix) for col in raw_probabilities_df.columns)
+    assert has_prob_column, f"DataFrame must contain column names starting with {prefix}."
+    
+    step1_df = aggregate_probabilities(df=raw_probabilities_df,
+                                        method=aggregate_method,
+                                        prefix=prefix,)
+    
+    step2_df = append_prediction(probabilities_df=step1_df, 
+                                 threshold_dict_help=threshold_dict_help,
+                                 threshold_dict_hinder=threshold_dict_hinder,
+                                 label_codes=label_codes,
+                                 prefix=prefix,)
+    
+    step3_df = aggregate_predictions(df=step2_df, 
+                                     pred_col='pred',
+                                     label_codes=label_codes,
+                                     votes_to_win_dict=votes_to_win_dict,)
+    
+    return step3_df
     
 def aggregate_probabilities(df: pd.DataFrame,
-                            method_dict: Union[None, dict] = None,
-                            prefix: str = 'prob_',
+                            method: Union[None, Dict[str, List[str]]] = None,
+                            prefix: Union[None, str] = None,
                             ) -> pd.DataFrame:
     
+    if method is None:
+        return df
+
+    if isinstance(method, dict):
+        if 'mean' not in method.keys():
+            method['mean'] = []
+        if 'max' not in method.keys():
+            method['max'] = []
+        if 'min' not in method.keys():
+            method['min'] = []
+        if not any(method[key] for key in method.keys()):
+            return df
+        
+    if prefix is None:
+        prefix = 'prob_'
+        
     output = df.copy()
+       
+    method['mean'] = [prefix + lesion for lesion in method['mean'] if prefix + lesion in output.columns]
+    method['max'] = [prefix + lesion for lesion in method['max'] if prefix + lesion in output.columns]
+    method['min'] = [prefix + lesion for lesion in method['min'] if prefix + lesion in output.columns]
     
-    if method_dict is None:
-        method_dict = { 'mean' : output.columns }
+    if 'lesion_id' in output.columns:
+        group = 'lesion_id'
+    elif 'image_id' in output.columns:
+        group = 'image_id'
     else:
-        method_dict['mean'] = [prefix + lesion for lesion in method_dict['mean'] if lesion in output.columns]
-        method_dict['max'] = [prefix + lesion for lesion in method_dict['max'] if lesion in output.columns]
-        method_dict['min'] = [prefix + lesion for lesion in method_dict['min'] if lesion in output.columns]
-    
-    mean_probs = output.groupby('lesion_id').mean()
-    max_probs = output.groupby('lesion_id').max()
-    min_probs = output.groupby('lesion_id').min()
+        print("DataFrame must have \'image_id\' column.")
+        return   
+
+    mean_probs = output.groupby(group).mean()
+    max_probs = output.groupby(group).max()
+    min_probs = output.groupby(group).min()
 
     for col in mean_probs.columns:
-        if col in method_dict['mean']:
-            output[col] = output['lesion_id'].map(mean_probs[col])
-        elif col in method_dict['max']:
-            output[col] = output['lesion_id'].map(max_probs[col])
-        elif col in method_dict['min']:
-            output[col] = output['lesion_id'].map(min_probs[col])
+        if col in method['mean']:
+            output[col] = output[group].map(mean_probs[col])
+        elif col in method['max']:
+            output[col] = output[group].map(max_probs[col])
+        elif col in method['min']:
+            output[col] = output[group].map(min_probs[col])
     
     return output        
     
-def threshold(probabilities: pd.Series, 
-              threshold_dict_help: Union[OrderedDict,None],
-              threshold_dict_hinder: Union[OrderedDict,None],
-              prefix: str = 'prob_') -> pd.Series:   
-    if isinstance(threshold_dict_help, OrderedDict):
-        for dx, thres in threshold_dict_help.items():
-            if prefix + dx in probabilities.index and probabilities[prefix + dx] > thres:
-                probabilities[prefix + dx] = 1
-                break
-    if isinstance(threshold_dict_hinder, OrderedDict):
-        for dx, thres in threshold_dict_hinder.items():
-                if prefix + dx in probabilities.index and probabilities[prefix + dx] < thres:
-                    probabilities[prefix + dx] = 0
-                    break            
-    return probabilities
+def append_prediction(probabilities_df: pd.DataFrame, 
+                      threshold_dict_help: Union[None, OrderedDict[str, float]] = None,
+                      threshold_dict_hinder: Union[None, OrderedDict[str, float]] = None,
+                      label_codes: Dict[int, str] = None,
+                      prefix: Union[None, str] = None,) -> pd.DataFrame:    
+    
+    if prefix is None:
+        prefix = 'prob_'
+    # Make a copy of the original dataframe
+    output_df = probabilities_df.copy()
+    
+    # Apply the 'get_argmax' function to the probabilities dataframe and append the result to the original
+    output_df['pred'] = probabilities_df.apply(get_argmax, 
+                                               prefix=prefix, 
+                                               threshold_dict_help=threshold_dict_help,
+                                               threshold_dict_hinder=threshold_dict_hinder,
+                                               label_codes=label_codes, 
+                                               axis=1)
+    return output_df
 
 def get_argmax(row: pd.DataFrame, 
-               prefix: str='prob_', 
-               threshold_dict_help: Union[OrderedDict,None] = None,
-               threshold_dict_hinder: Union[OrderedDict,None] = None,
-               inverse_label_codes=Union[dict,None]) -> Union[int, str]:
+               prefix: Union[None, str]=None, 
+               threshold_dict_help: Union[None, OrderedDict[str, float]] = None,
+               threshold_dict_hinder: Union[None, OrderedDict[str, float]] = None,
+               label_codes=Union[None, Dict[int, str]]) -> Union[int, str]:
+    
+    if prefix is None:
+        prefix = 'prob_'
     # Filter columns based on the prefix
     prob_columns = [col for col in row.index if col.startswith(prefix)] #? why .index and not .columns? No, after applying .groupby, the grroupby column becomes the index of the resulting dataframe or something
     probabilities = row[prob_columns].astype(float)
@@ -794,67 +804,77 @@ def get_argmax(row: pd.DataFrame,
         
     max_column = probabilities.idxmax()
     dx = max_column.split('_')[1]  # Split the string and return the second part (after the prefix)
-    if inverse_label_codes:
-        return inverse_label_codes[dx]  # Return the label if inverse_label_codes is provided
+    if label_codes:
+        inverse_label_codes = { v : k for k, v in label_codes.items() }
+        return inverse_label_codes[dx]  # Return the label if label_codes are provided
     else:
         return dx  # Otherwise, return the code itself
     
-def append_prediction(original_df: pd.DataFrame,
-                      probabilities_df: pd.DataFrame, 
-                      threshold_dict_help: Union[OrderedDict, None] = None,
-                      threshold_dict_hinder: Union[OrderedDict, None] = None,
-                      inverse_label_codes: Union[dict,None] = None,
-                      prefix: str = 'prob_',) -> pd.DataFrame:    
+def threshold(probabilities: pd.Series, 
+              threshold_dict_help: Union[None, OrderedDict[str, float]],
+              threshold_dict_hinder: Union[None, OrderedDict[str, float]],
+              prefix: Union[None, str] = None) -> pd.Series:   
     
-    # Make a copy of the original dataframe
-    output_df = original_df.copy()
+    if prefix is None:
+        prefix = 'prob_'
     
-    # Apply the 'get_argmax' function to the probabilities dataframe and append the result to the original
-    output_df['pred'] = probabilities_df.apply(get_argmax, 
-                                               prefix=prefix, 
-                                               threshold_dict_help=threshold_dict_help,
-                                               threshold_dict_hinder=threshold_dict_hinder,
-                                               inverse_label_codes=inverse_label_codes, 
-                                               axis=1)
-    return output_df
-
-def df_with_probabilities(model_or_path: Union[cnn, Path],) -> pd.DataFrame:
-    if isinstance(model_or_path, cnn):
-        instance = model_or_path
-        try:
-            if isinstance(instance._df_inference, pd.DataFrame):
-                return instance._df_inference
-            else:
-                try:
-                    filename_csv = instance._filename + "_infer.csv"
-                    file_path_csv = instance.model_dir.joinpath(filename_csv)
-                    instance._df_inference = pd.read_csv(file_path_csv)
-                    return instance._df_inference
-                except Exception as e:
-                    print(f"Error reading csv file {file_path_csv}: {e}")            
-                    return
-        except AttributeError as e:
-            print(f"{e}")          
-            try:
-                filename_csv = instance._filename + "_infer.csv"
-                file_path_csv = instance.model_dir.joinpath(filename_csv)
-                instance._df_inference = pd.read_csv(file_path_csv)
-                return instance._df_inference
-            except Exception as e:
-                print(f"Error reading csv file {file_path_csv}: {e}")            
-                return
-    elif isinstance(model_or_path, Path):
-        file_path_csv = model_or_path
-        try:
-            output_df = pd.read_csv(file_path_csv)
-        except Exception as e:
-            print(f"Error reading csv file {file_path_csv} : {e}")
-            return
+    if isinstance(threshold_dict_help, OrderedDict):
+        for dx, thres in threshold_dict_help.items():
+            if prefix + dx in probabilities.index and probabilities[prefix + dx] > thres:
+                probabilities[prefix + dx] = 1
+                break
+    if isinstance(threshold_dict_hinder, OrderedDict):
+        for dx, thres in threshold_dict_hinder.items():
+                if prefix + dx in probabilities.index and probabilities[prefix + dx] < thres:
+                    probabilities[prefix + dx] = 0
+                    break            
+    return probabilities
+   
+def aggregate_predictions(df: pd.DataFrame, 
+                          label_codes: Dict[int, str],
+                          votes_to_win_dict: Union[None, OrderedDict[str, int]]=None,
+                          pred_col: Union[None, str] = None,) -> pd.DataFrame:
+    if pred_col is None:
+        pred_col = 'pred'
+    
+    if 'lesion_id' in df.columns:
+        group = 'lesion_id'
+    elif 'image_id' in df.columns:
+        group = 'image_id'
     else:
-        print("First argument must be an instance of a model class of a Path to a csv file.")
+        print("DataFrame must have image_id column.")
         return
-    return output_df
     
+    try:
+        df['pred_final_tmp'] = df.groupby(group).apply(one_and_win, label_codes, votes_to_win_dict, pred_col)['pred_final_tmp']    
+        mode_df = df.groupby(group)['pred_final_tmp'].agg(mode_with_random)
+        output = df.merge(mode_df, left_on=group, right_index=True, suffixes=('', '_')).drop('pred_final_tmp', axis=1)
+        output = output.rename(columns={'pred_final_tmp_': 'pred_final'})
+    except:
+        mode_df = df.groupby(group)[pred_col].agg(mode_with_random)
+        output = df.merge(mode_df, left_on=group, right_index=True, suffixes=('', '_final'))
+    
+    if 'pred_final_tmp' in output.columns:
+        output = output.drop('pred_final_tmp', axis=1)
+    
+    return output
+
+def one_and_win(g: pd.DataFrame,                
+                label_codes: Dict[int, str],
+                votes_to_win_dict: Union[None, OrderedDict[str, int]]=None,
+                pred_col: Union[None, str] = None,) -> pd.DataFrame:
+    
+    if pred_col is None:
+        pred_col = 'pred'
+    
+    if isinstance(votes_to_win_dict, OrderedDict):
+        inverse_label_codes = { v : k for k, v in label_codes.items() }
+        for dx, votes in votes_to_win_dict.items():
+            if (g[pred_col] == inverse_label_codes[dx]).sum() >= votes:
+                g['pred_final_tmp'] = inverse_label_codes[dx]
+                break
+    return g
+
 def mode_with_random(x):
     modes = x.mode()
     if not modes.empty:
@@ -863,12 +883,6 @@ def mode_with_random(x):
         max_count = x.value_counts().max()
         modes = x.value_counts()[x.value_counts() == max_count].index.tolist()
         return np.random.choice(modes)
-
-def predictions_mode(df: pd.DataFrame, 
-                     pred_col: str = 'pred',) -> pd.DataFrame:
-    mode_df = df.groupby('lesion_id')[pred_col].agg(mode_with_random)
-    output = df.merge(mode_df, left_on='lesion_id', right_index=True, suffixes=('', '_mode')).drop('pred', axis=1)
-    return output
 
 def load_dict(model_dir: Path, filename: str) -> dict:
     if '.' in filename:
