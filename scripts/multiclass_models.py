@@ -93,6 +93,7 @@ class cnn:
         code_test: Union[bool, None] = None,        
         Print: Union[bool,None] = None,
         model: Union[None, models.ResNet, models.EfficientNet] = None, 
+        unfreeze_all: Union[None, bool] = None,
         state_dict: Union[None, Dict[str, torch.Tensor]] = None,  
         epoch_losses: Union[dict, None] = None,
     ) -> None:
@@ -141,6 +142,7 @@ class cnn:
         self.code_test = code_test
         self.Print = Print
         self.model = model
+        self.unfreeze_all = unfreeze_all
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses
         
@@ -170,7 +172,8 @@ class cnn:
             self.Print = False
         if self.model is None:
             self.model = models.resnet18(weights="ResNet18_Weights.DEFAULT")  
-#             self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
+        if self.unfreeze_all is None:
+            self.unfreeze_all = True
             
         if isinstance(self.source, process):
             # New attributes
@@ -216,7 +219,7 @@ class cnn:
                 print("\n- ".join(to_print))
                 self.epochs = 1
                 self.Print = True
-                self.filename_suffix = "test"
+                self.filename_suffix = self.filename_suffix + "test"
                 self.overwrite = True         
                 self.df_train = self.source._df_train_code_test
                 self.df_val1 = self.source._df_val1_code_test
@@ -261,7 +264,6 @@ class cnn:
         elements.append(str(self.epochs) + "e")
 
         base_filename = "_".join(elements)
-#         base_filename = "_".join([self.filename_stem, tcode, balance_code, testcode, str(self.epochs) + "e",])
 
         # Find a unique filename by incrementing a counter
         counter = 0
@@ -292,10 +294,7 @@ class cnn:
 
         # Load the ResNet18/EfficientNet model
         model = self.model
-        # Unfreeze all layers for fine-tuning
-        for param in model.parameters():
-            param.requires_grad = True  # All layers unfrozen for fine-tuning right away
-
+        
         # Replace the last layer for classification with appropriate number of labels
         if isinstance(model,models.ResNet):
             num_ftrs = model.fc.in_features
@@ -303,6 +302,26 @@ class cnn:
         elif isinstance(model,models.EfficientNet):
             num_ftrs = model.classifier[1].in_features
             model.classifier[1] = nn.Linear(num_ftrs, len(self.label_codes))
+            
+        if self.unfreeze_all:
+            # Unfreeze all layers for fine-tuning
+            for param in model.parameters():
+                param.requires_grad = True  # All layers unfrozen for fine-tuning right away
+        else:
+            if isinstance(model,models.ResNet):
+                # Identify the final convolutional block and the fully connected layers
+                final_block = model.layer4  # Assuming ResNet-18 has a 'layer4' attribute for the final convolutional block
+                fully_connected = model.fc  # Assuming ResNet-18 has an 'fc' attribute for the fully connected layers
+                # Unfreeze the final convolutional block
+                for param in final_block.parameters():
+                    param.requires_grad = True
+                # Unfreeze the fully connected layers
+                for param in fully_connected.parameters():
+                    param.requires_grad = True
+            elif isinstance(model,models.EfficientNet):
+                print("Need to update code for EfficientNet regarding unfreezing final layers")
+                return
+
 
         # Define loss function and optimizer
         criterion = nn.CrossEntropyLoss()
