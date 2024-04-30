@@ -675,15 +675,8 @@ def get_probabilities(
         # Concatenate all DataFrames in image_id_prob_list
         image_id_prob = pd.concat(image_id_prob_list, axis=0) 
         # Combine...
-#         image_id_prob=image_id_prob.reset_index(drop=True)
-#         df_probabilities = df.merge(image_id_prob, left_index=True, right_index=True)
-#         if (df_probabilities['image_id_x'] == df_probabilities['image_id_y']).all():
-#             df_probabilities.drop('image_id_y', axis=1, inplace=True)
-#             df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
-        # Sort then combine...            
-        image_id_prob_sorted = image_id_prob.sort_values(by='image_id')
-        df_sorted = df.sort_values(by='image_id')    
-        df_probabilities = df_sorted.merge(image_id_prob_sorted, left_index=True, right_index=True)        
+        image_id_prob=image_id_prob.reset_index(drop=True)
+        df_probabilities = df.merge(image_id_prob, left_index=True, right_index=True)
         if (df_probabilities['image_id_x'] == df_probabilities['image_id_y']).all():
             df_probabilities.drop('image_id_y', axis=1, inplace=True)
             df_probabilities.rename(columns={'image_id_x': 'image_id'}, inplace=True)
@@ -768,9 +761,11 @@ def aggregate_probabilities(df: pd.DataFrame,
         print("DataFrame must have \'image_id\' column.")
         return   
 
-    mean_probs = output.groupby(group).mean()
-    max_probs = output.groupby(group).max()
-    min_probs = output.groupby(group).min()
+    numeric_columns = output.columns[output.columns.str.startswith('prob_')].tolist()
+    
+    mean_probs = output.groupby(group)[numeric_columns].mean()
+    max_probs = output.groupby(group)[numeric_columns].max()
+    min_probs = output.groupby(group)[numeric_columns].min()
 
     for col in mean_probs.columns:
         if col in method['mean']:
