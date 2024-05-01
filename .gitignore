@@ -5,5 +5,5 @@
 *.pth
 
 # Ignore these folders:
-notebooks/.ipynb_checkpoints
-scripts/__pycache__/
+.ipynb_checkpoints
+__pycache__/
