@@ -408,11 +408,11 @@ class cnn:
                         print(f"val1_loss: {val_loss}")
                     val_running_loss += val_loss.item()
 
-                    # Calculate validation loss for the epoch
-                    val1_epoch_loss = val_running_loss / len(val_dataloader1)
-                    # Add it to the dictionary
-                    loss_dict["val1_loss"][epoch] = val1_epoch_loss
-                    print(f"Epoch {epoch}, val1_loss: {val1_epoch_loss}")
+                # Calculate validation loss for the epoch
+                val1_epoch_loss = val_running_loss / len(val_dataloader1)
+                # Add it to the dictionary
+                loss_dict["val1_loss"][epoch] = val1_epoch_loss
+                print(f"Epoch {epoch}, val1_loss: {val1_epoch_loss}")
                     
             validation_data_a = image_n_label(
                 self.df_val_a, # all images per lesion
@@ -442,11 +442,11 @@ class cnn:
                         print(f"val_a_loss: {val_loss}")
                     val_running_loss += val_loss.item()
 
-                    # Calculate validation loss for the epoch
-                    val_a_epoch_loss = val_running_loss / len(val_dataloader_a)
-                    # Add it to the dictionary
-                    loss_dict["val_a_loss"][epoch] = val_a_epoch_loss   
-                    print(f"Epoch {epoch}, val_a_loss: {val_a_epoch_loss}")
+                # Calculate validation loss for the epoch
+                val_a_epoch_loss = val_running_loss / len(val_dataloader_a)
+                # Add it to the dictionary
+                loss_dict["val_a_loss"][epoch] = val_a_epoch_loss   
+                print(f"Epoch {epoch}, val_a_loss: {val_a_epoch_loss}")
 
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss 1: {val1_epoch_loss:.4f}, Validation Loss a: {val_a_epoch_loss:.4f}"
