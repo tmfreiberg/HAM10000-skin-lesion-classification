@@ -172,9 +172,14 @@ class process:
             )  # {"akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"}
             try:
                 care_about = set(self.to_classify).intersection(all_dxs)
+                care_about = list(care_about)
+                # For consistency, it's very important to always have the same mapping from labels to label codes, hence the sorting...
+                care_about.sort()
                 # Maybe there were some classes in self.to_classify that don't actually exist in the dataframe:
-                self.to_classify = list(care_about)
-                others = all_dxs - care_about
+                self.to_classify = care_about
+                others = all_dxs - set(care_about)
+                others = list(others)
+                others.sort()
                 if others:
                     self.label_dict = {dx : 0 for dx in others}
                     self.label_dict.update({dx: i + 1 for i, dx in enumerate(care_about)})
@@ -196,27 +201,47 @@ class process:
                 # Make sure all dx's represented in to_classify actually appear in the data
                 for dx_category, dx_list in self.to_classify.items():
                     check_exists = set(dx_list).intersection(all_dxs)
+                    check_exists = list(check_exists)
+                    check_exists.sort()
                     self.to_classify[dx_category] = list(check_exists)
 
                 # Remove any dx_category, dx_list item from the dictionary if the dx_list is empty
                 self.to_classify = { dx_category : dx_list for dx_category, dx_list in self.to_classify.items() if dx_list }
-
-                self.label_codes = { i + 1 : dx_category for i, dx_category in enumerate(self.to_classify.keys()) }
-
-                care_about = set()
+                # e.g. self.to_classify = {'malignant' : ['mel', 'bcc'], 'benign' : ['nv','bkl']}
+                to_classify_keys = self.to_classify.keys()
+                # e.g. to_classify_keys = ['malignant', 'benign']
+                to_classify_keys.sort()
+                # e.g. to_classify_keys = ['benign', 'malignant']
+                # actually this should already have been sorted when we did check_exists.sort(), but it can't hurt...
+                self.label_codes = { i + 1 : dx_category for i, dx_category in enumerate(to_classify_keys) }
+                # e.g. self.label_codes = { 1 :  'benign', 2 : 'malignant' }
+                care_about = set()                
                 for dx_list in self.to_classify.values():
                     care_about.update(dx_list)
-                others = all_dxs - care_about
+                    # e.g. care_about = { 'mel', 'bcc', 'nv', 'bkl' }
+                care_about = list(care_about)
+                care_about.sort()
+                # e.g. care_about = ['bcc', 'bkl', 'mel', 'nv' ]
+                others = all_dxs - set(care_about)
+                others = list(others)
+                others.sort()
+                # e.g. others = [ 'akiec', 'df', 'vasc' ]
                 if others:
-                    self.to_classify['other'] = list(others)
+                    self.to_classify['other'] = others
+                    # e.g. self.to_classify['other'] = [ 'akiec', 'df', 'vasc' ]
                     self.label_codes[0] = 'other'
+                    # e.g. self.labels_codes = { 0 : 'other', 1 :  'benign', 2 : 'malignant' }
                 else:
-                    self.label_codes = { j - 1 : dx_category for j, dx_category in self.label_codes.items() }            
+                    self.label_codes = { j - 1 : dx_category for j, dx_category in self.label_codes.items() }    
+                    # e.g. self.label_codes = { 0 :  'benign', 1 : 'malignant' }
 
                 self.label_dict = { }
                 for i, dx_category in self.label_codes.items():
+                    # e.g. for i, dx_category in <(0, 0 : 'other'), (1, 1: 'benign'), (2, 2: 'malignant')>
                     for dx in self.to_classify[dx_category]:
+                        # e.g. for dx in self.to_classify['other'] = [ 'akiec', 'df', 'vasc' ]
                         self.label_dict[dx] = i
+                        # e.g. self.label_dict['akiec'] = 0, self.label_dict['df'] = 0, self.label_dict['vasc'] = 0
                 # New attribute
                 self._num_labels = len(self.label_dict)                
             except Exception as e:
