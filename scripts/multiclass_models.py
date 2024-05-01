@@ -144,6 +144,7 @@ class cnn:
         self.Print = Print
         self.model = model
         self.unfreeze_all = unfreeze_all
+        self.unfreeze_last = unfreeze_last
         self.state_dict = state_dict
         self.epoch_losses = epoch_losses
         
@@ -253,7 +254,15 @@ class cnn:
             else:
                 pass
         except:
-            pass       
+            pass 
+        uf = ""
+        try:
+            if self.unfreeze_all:
+                uf += "ufall"
+            elif self.unfreeze_last:
+                uf += "uflast"
+        except:
+            pass
 
         # Initial filename without suffix
         elements = [self.filename_stem]
@@ -261,8 +270,8 @@ class cnn:
             elements.append(tcode)
         if balance_code:
             elements.append(balance_code)
-        if testcode:
-            elements.append(testcode)
+        if uf:
+            elements.append(uf)
         elements.append(str(self.epochs) + "e")
         if self.filename_suffix:
             elements.append(self.filename_suffix)
@@ -345,6 +354,7 @@ class cnn:
 
         for epoch in range(num_epochs):
             model.train()
+            batch_counter = 0
             running_loss = 0.0
             for images, labels, _ in dataloader:
                 images, labels = images.to(device), labels.to(device)
@@ -357,11 +367,15 @@ class cnn:
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
+                if batch_counter%10 == 0:
+                    print(f"Batch: {batch_counter}, running loss: {running_loss}")
+                batch_counter += 1
 
             # Calculate validation loss for the epoch
             epoch_loss = running_loss / len(dataloader)
             # Add it to the dictionary
             loss_dict["train_loss"][epoch] = epoch_loss
+            print(f"Epoch {epoch}, train_loss: {epoch_loss}")
 
             # Validation step
             # Define DataLoader for batch processing for validation set
@@ -398,6 +412,7 @@ class cnn:
                     val1_epoch_loss = val_running_loss / len(val_dataloader1)
                     # Add it to the dictionary
                     loss_dict["val1_loss"][epoch] = val1_epoch_loss
+                    print(f"Epoch {epoch}, val1_loss: {val1_epoch_loss}")
                     
             validation_data_a = image_n_label(
                 self.df_val_a, # all images per lesion
@@ -430,7 +445,8 @@ class cnn:
                     # Calculate validation loss for the epoch
                     val_a_epoch_loss = val_running_loss / len(val_dataloader_a)
                     # Add it to the dictionary
-                    loss_dict["val_a_loss"][epoch] = val_a_epoch_loss                    
+                    loss_dict["val_a_loss"][epoch] = val_a_epoch_loss   
+                    print(f"Epoch {epoch}, val_a_loss: {val_a_epoch_loss}")
 
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {epoch_loss:.4f}, Validation Loss 1: {val1_epoch_loss:.4f}, Validation Loss a: {val_a_epoch_loss:.4f}"
