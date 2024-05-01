@@ -94,6 +94,7 @@ class cnn:
         Print: Union[bool,None] = None,
         model: Union[None, models.ResNet, models.EfficientNet] = None, 
         unfreeze_all: Union[None, bool] = None,
+        unfreeze_last: Union[None, bool] = None,
         state_dict: Union[None, Dict[str, torch.Tensor]] = None,  
         epoch_losses: Union[dict, None] = None,
     ) -> None:
@@ -173,7 +174,11 @@ class cnn:
         if self.model is None:
             self.model = models.resnet18(weights="ResNet18_Weights.DEFAULT")  
         if self.unfreeze_all is None:
-            self.unfreeze_all = True
+            self.unfreeze_all = False
+        if self.unfreeze_all:
+            self.unfreeze_last = True
+        if self.unfreeze_last is None:
+            self.unfreeze_last = True
             
         if isinstance(self.source, process):
             # New attributes
@@ -219,7 +224,7 @@ class cnn:
                 print("\n- ".join(to_print))
                 self.epochs = 1
                 self.Print = True
-                self.filename_suffix = self.filename_suffix + "test"
+                self.filename_suffix = self.filename_suffix + "_test"
                 self.overwrite = True         
                 self.df_train = self.source._df_train_code_test
                 self.df_val1 = self.source._df_val1_code_test
@@ -248,10 +253,7 @@ class cnn:
             else:
                 pass
         except:
-            pass
-        testcode = ""
-        if self.code_test:
-            testcode += "test"        
+            pass       
 
         # Initial filename without suffix
         elements = [self.filename_stem]
@@ -262,13 +264,15 @@ class cnn:
         if testcode:
             elements.append(testcode)
         elements.append(str(self.epochs) + "e")
-
+        if self.filename_suffix:
+            elements.append(self.filename_suffix)
+        
         base_filename = "_".join(elements)
 
         # Find a unique filename by incrementing a counter
         counter = 0
         while not self.overwrite:
-            filename = base_filename + f"_{self.filename_suffix}_{counter:02d}"
+            filename = base_filename + f"_{counter:02d}"
             filepath = self.model_dir.joinpath(filename + ".pth")
 
             # Check if the file already exists
@@ -279,7 +283,7 @@ class cnn:
 
         # New attribute
         if self.overwrite:            
-            self._filename = base_filename + f"_{self.filename_suffix}_{counter:02d}" 
+            self._filename = base_filename + f"_{counter:02d}" 
             print(f"Existing files will be overwritten. \nBase filename: {self._filename}")
         else:
             self._filename = filename
@@ -307,7 +311,7 @@ class cnn:
             # Unfreeze all layers for fine-tuning
             for param in model.parameters():
                 param.requires_grad = True  # All layers unfrozen for fine-tuning right away
-        else:
+        elif self.unfreeze_last:
             if isinstance(model,models.ResNet):
                 # Identify the final convolutional block and the fully connected layers
                 final_block = model.layer4  # Assuming ResNet-18 has a 'layer4' attribute for the final convolutional block

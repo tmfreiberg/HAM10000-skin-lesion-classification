@@ -197,22 +197,27 @@ class process:
                 print(f"Error creating self.label_dict: {e}")
         elif isinstance(self.to_classify, dict):
             all_dxs: set = set(self.df["dx"].unique())
+                # e.g. all_dxs = {"akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"}
             try:
                 # Make sure all dx's represented in to_classify actually appear in the data
                 for dx_category, dx_list in self.to_classify.items():
+                    # e.g. for 'benign', ['nv', 'bkl']
                     check_exists = set(dx_list).intersection(all_dxs)
+                    # e.g. check_exists = {'nv', 'bkl'}
                     check_exists = list(check_exists)
+                    # e.g. check_exists = ['nv', 'bkl']
                     check_exists.sort()
-                    self.to_classify[dx_category] = list(check_exists)
+                    # e.g. check_exists = ['bkl', 'nv']
+                    self.to_classify[dx_category] = check_exists
+                    # e.g. self.to_classify['benign'] = ['bkl', 'nv']
 
                 # Remove any dx_category, dx_list item from the dictionary if the dx_list is empty
                 self.to_classify = { dx_category : dx_list for dx_category, dx_list in self.to_classify.items() if dx_list }
                 # e.g. self.to_classify = {'malignant' : ['mel', 'bcc'], 'benign' : ['nv','bkl']}
-                to_classify_keys = self.to_classify.keys()
+                to_classify_keys = list(self.to_classify.keys())
                 # e.g. to_classify_keys = ['malignant', 'benign']
                 to_classify_keys.sort()
                 # e.g. to_classify_keys = ['benign', 'malignant']
-                # actually this should already have been sorted when we did check_exists.sort(), but it can't hurt...
                 self.label_codes = { i + 1 : dx_category for i, dx_category in enumerate(to_classify_keys) }
                 # e.g. self.label_codes = { 1 :  'benign', 2 : 'malignant' }
                 care_about = set()                
@@ -230,9 +235,9 @@ class process:
                     self.to_classify['other'] = others
                     # e.g. self.to_classify['other'] = [ 'akiec', 'df', 'vasc' ]
                     self.label_codes[0] = 'other'
-                    # e.g. self.labels_codes = { 0 : 'other', 1 :  'benign', 2 : 'malignant' }
+                    # e.g. self.labels_codes = { 0 : 'other', 1 :  'benign', 2 : 'malignant' }                    
                 else:
-                    self.label_codes = { j - 1 : dx_category for j, dx_category in self.label_codes.items() }    
+                    self.label_codes = { j - 1 : dx_category for j, dx_category in self.label_codes.items() }                     
                     # e.g. self.label_codes = { 0 :  'benign', 1 : 'malignant' }
 
                 self.label_dict = { }
