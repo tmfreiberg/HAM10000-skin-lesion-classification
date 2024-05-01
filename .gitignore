@@ -1,5 +1,6 @@
 # Ignore image files (too many, too large)
 *.jpg
+!/streamlit/images/*.jpg
 
 # Ignore .pth files (too large)
 *.pth
