@@ -495,6 +495,8 @@ class cnn:
         "self.code_test": self.code_test,
         "self.Print": self.Print,
         "self.model": self.model,
+        "self.unfreeze_all": self.unfreeze_all,
+        "self.unfreeze_last": self.unfreeze_last,   
         "self.state_dict": self.state_dict,
         "self.epoch_losses": self.epoch_losses,
         "self._filename": self._filename,

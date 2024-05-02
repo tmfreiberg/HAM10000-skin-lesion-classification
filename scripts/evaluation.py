@@ -3,10 +3,6 @@ import numpy as np
 from typing import Union, Tuple, Callable
 import copy
 
-# from processing import process
-# from pathlib import Path
-# from multiclass_models import resnet18
-
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -450,3 +446,168 @@ def custom_confusion(
             value.rename(columns=label_dictionary, inplace=True)
 
     return output
+
+'''
+WHAT FOLLOWS IS A CONVENIENT FUNCTION THAT PRINTS A SUMMARY OF A MODEL EVALUATION. 
+IT MERELY SAVES REPETITION OF LONG CODE CELLS IN THE MODEL EVALUATION SUMMARY NOTEBOOK
+'''
+
+from utils import print_header
+from pathlib import Path
+from collections import OrderedDict
+from typing import Dict, List
+from multiclass_models import final_prediction
+
+def print_model_evaluation(model_name: Union[None, str],
+                           file_path1: Union[None,Path], 
+                           file_path_a: Union[None, Path],
+                           aggregate_method: Union[None, Dict[str, List[str]]] = None,
+                           threshold_dict_help: Union[None, OrderedDict[str, float]] = None,
+                           threshold_dict_hinder: Union[None, OrderedDict[str, float]] = None,
+                           votes_to_win_dict: Union[None, OrderedDict[str, int]] = None, 
+                           label_codes: Dict[int, str] = Union[None, Dict[int, str]],
+                           prefix: Union[None, str] = 'prob_',
+                           weights: Union[None, np.ndarray] = None,
+                                                   ) -> None:
+    
+    if file_path1:
+        df_probabilities_val1 = pd.read_csv(file_path1, index_col=0)
+    if file_path_a:
+        df_probabilities_val_a = pd.read_csv(file_path_a, index_col=0)
+    
+    print_header(f"{model_name}: probabilities")    
+
+    if file_path1:
+        print("Validation set: one image per lesion".upper())
+        print(f"\nHeader: full dataframe has {df_probabilities_val1.shape[0]} rows.", end = ' ')
+        print(f"Columns are also restricted for display purposes.")
+        display_columns = ['lesion_id', 'image_id', 'dx'] + [col for col in df_probabilities_val1.columns if col.startswith('prob')]
+        display(df_probabilities_val1[display_columns].head())
+
+    if file_path_a:
+        print("\nValidation set: all images per lesion".upper())
+        print(f"\nHeader: full dataframe has {df_probabilities_val_a.shape[0]} rows.", end = ' ')
+        print(f"Columns are also restricted for display purposes.")
+        display_columns = ['lesion_id', 'image_id', 'dx'] + [col for col in df_probabilities_val1.columns if col.startswith('prob')]
+        display(df_probabilities_val_a[display_columns].head())
+    
+    
+    if file_path1:
+        raw_probabilities_df1: pd.DataFrame = df_probabilities_val1
+    if file_path_a:
+        raw_probabilities_df_a: pd.DataFrame = df_probabilities_val_a
+    
+    print_header(f"{model_name}: predictions")
+
+    if file_path1:
+        print("Validation set, one image per lesion: combining probabilities, making predictions".upper())
+        df_pred_val1 = final_prediction(raw_probabilities_df=raw_probabilities_df1,
+                                              threshold_dict_help=threshold_dict_help,
+                                              threshold_dict_hinder=threshold_dict_hinder,
+                                              votes_to_win_dict=votes_to_win_dict,
+                                              label_codes=label_codes,)
+        display_columns = ['lesion_id', 'image_id', 'dx'] + [col for col in df_probabilities_val1.columns if col.startswith('prob')] + ['pred', 'pred_final']
+        display(df_pred_val1[display_columns].head())
+
+    if file_path_a:
+        print("Validation set, all images per lesion: combining probabilities, making predictions, combining predictions".upper())
+
+        df_pred_val_a = final_prediction(raw_probabilities_df=raw_probabilities_df_a,
+                                                  threshold_dict_help=threshold_dict_help,
+                                                  threshold_dict_hinder=threshold_dict_hinder,
+                                                  votes_to_win_dict=votes_to_win_dict,
+                                                  label_codes=label_codes,)
+
+        display(df_pred_val_a[display_columns].head())
+    
+    print_header(f"{model_name}: confusion matrices")
+    
+    map_labels = label_codes
+
+    if file_path1:
+        target1 = df_pred_val1.drop_duplicates(subset='lesion_id')['label']
+        prediction1 = df_pred_val1.drop_duplicates(subset='lesion_id')['pred_final']
+        txp1 = pd.crosstab(target1,prediction1,margins=True,dropna=False)
+
+    if file_path_a:
+        target_a = df_pred_val_a.drop_duplicates(subset='lesion_id')['label']
+        prediction_a = df_pred_val_a.drop_duplicates(subset='lesion_id')['pred_final']
+        txp_a = pd.crosstab(target_a,prediction_a,margins=True,dropna=False)
+
+    beta = 2
+    # Weights inversely proportional to relative class size in the training set, giving more importance to smaller classes.
+    # weights = 1/df_train['label'].value_counts(normalize=True).sort_index().values # None
+#     weights = np.array([ 7.42063492, 29.92      , 19.47916667,  9.00120337,  1.49390853])
+
+    if file_path1:
+        cm1 = confusion_matrix_with_metric(AxB=txp1,
+                                                lst=None,
+                                                full_pad=True,
+                                                func=weighted_average_f,
+                                                beta=beta,
+                                                weights=weights,
+                                                percentage=False,
+                                                map_labels=map_labels)
+        
+        print("Confusion matrix: validation set, one image per lesion".upper())
+        display(cm1.fillna('_'))        
+     
+    if file_path_a:
+        cm_a = confusion_matrix_with_metric(AxB=txp_a,
+                                                lst=None,
+                                                full_pad=True,
+                                                func=weighted_average_f,
+                                                beta=beta,
+                                                weights=weights,
+                                                percentage=False,
+                                                map_labels=map_labels)
+
+        print("Confusion matrix: validation set, all images per lesion".upper())
+        display(cm_a.fillna('_'))
+
+    print_header(f"{model_name}: metrics")
+    
+    if file_path1:
+        target1 = df_pred_val1.drop_duplicates(subset='lesion_id')['label']
+        prediction1 = df_pred_val1.drop_duplicates(subset='lesion_id')['pred_final']
+        probabilities1 = df_probabilities_val1.drop_duplicates(subset='lesion_id').filter(regex=r'^prob_')
+        agg_probabilities1 = df_pred_val1.drop_duplicates(subset='lesion_id').filter(regex=r'^prob_')
+        
+        metric_dict1 = metric_dictionary(target=target1,
+                                              prediction=prediction1,
+                                              probabilities=probabilities1)
+        print("\nOne image per lesion".upper())
+        display(pd.DataFrame(metric_dict1))
+
+    if file_path_a:
+        target_a = df_pred_val_a.drop_duplicates(subset='lesion_id')['label']
+        prediction_a = df_pred_val_a.drop_duplicates(subset='lesion_id')['pred_final']
+        probabilities_a = df_probabilities_val_a.drop_duplicates(subset='lesion_id').filter(regex=r'^prob_')
+        agg_probabilities_a = df_pred_val_a.drop_duplicates(subset='lesion_id').filter(regex=r'^prob_')
+
+        metric_dict_a = metric_dictionary(target=target_a,
+                                              prediction=prediction_a,
+                                              probabilities=probabilities_a)
+
+        print("\nAll images per lesion".upper())
+        display(pd.DataFrame(metric_dict_a))
+
+    
+
+    
+
+    
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
