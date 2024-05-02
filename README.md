@@ -34,6 +34,8 @@ The Streamlit app allows users to:
   
 - Address artifacts in images, such as markings from dermatologists, for improved classification accuracy.
 
+- Incorporate other available features, such as age, sex, and localization, into a model.
+
 ## How to Use the Streamlit App
 
 1. Clone the repository to your local machine.
