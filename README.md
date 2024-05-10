@@ -8,7 +8,7 @@ This project aims to classify skin lesions based on images using machine learnin
   
 - **Medical Students:** This project provides valuable hands-on experience in applying machine learning to healthcare challenges.
   
-- **Public Awareness Campaigns:** Initiatives like [SunSmart](https://www.sunsmart.com.au/)" can benefit from improved skin lesion classification, aiding in public awareness and education.
+- **Public Awareness Campaigns:** Initiatives like [SunSmart](https://www.sunsmart.com.au/) can benefit from improved skin lesion classification, aiding in public awareness and education.
 
 ## Project Overview
 
