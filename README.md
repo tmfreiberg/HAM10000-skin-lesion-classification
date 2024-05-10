@@ -2,8 +2,6 @@
 
 This project aims to classify skin lesions based on images using machine learning models. Early detection of melanoma and other skin cancers is crucial for improving survival rates. The project includes a Streamlit app for testing classification ability.
 
-![Alt Text](dermatoscope.png)
-
 ## Key Stakeholders
 
 - **Healthcare Workers:** They may use a reliable model to assist with diagnoses, helping confirm their diagnosis or prompting further consideration.
