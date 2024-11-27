@@ -863,7 +863,7 @@ def get_argmax(row: pd.DataFrame,
     else:
         return dx  # Otherwise, return the code itself
 """
-START: REPEAIRING INCORRECT LOGIC OF THRESHOLD FUNCTION BELOW. MODELS WILL NEED TO BE RE-EVALUATED.
+START: REPAIRING INCORRECT LOGIC OF THRESHOLD FUNCTION BELOW. MODELS WILL NEED TO BE RE-EVALUATED.
 """
 
 # New version of the threshold function.
@@ -940,7 +940,7 @@ def threshold(probabilities: Union[pd.Series, np.ndarray], # This is the correct
 #     return probabilities
 
 """
-END: REPEAIRING INCORRECT LOGIC OF THRESHOLD FUNCTION ABOVE. MODELS WILL NEED TO BE RE-EVALUATED.
+END: REPAIRING INCORRECT LOGIC OF THRESHOLD FUNCTION ABOVE. MODELS WILL NEED TO BE RE-EVALUATED.
 """
    
 def aggregate_predictions(df: pd.DataFrame, 
